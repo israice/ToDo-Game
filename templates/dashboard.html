@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quest Todo - Gamified Task Manager</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Particles container for effects -->
+        <div id="particles"></div>
+
+        <!-- Header with stats -->
+        <header class="game-header">
+            <!-- User info -->
+            <div class="user-info">
+                <span class="user-greeting">{{ user }}</span>
+                <a href="/logout" class="logout-btn">Logout</a>
+            </div>
+
+            <div class="level-badge">
+                <span class="level-icon">&#9733;</span>
+                <span class="level-text">LVL <span id="level">1</span></span>
+            </div>
+
+            <div class="xp-container">
+                <div class="xp-bar">
+                    <div class="xp-fill" id="xp-fill"></div>
+                    <span class="xp-text"><span id="xp">0</span> / <span id="xp-max">100</span> XP</span>
+                </div>
+            </div>
+
+            <div class="combo-container" id="combo-container">
+                <span class="combo-fire">&#128293;</span>
+                <span class="combo-count">x<span id="combo">0</span></span>
+                <span class="combo-label">COMBO</span>
+            </div>
+
+            <div class="stats-mini">
+                <div class="stat-item">
+                    <span class="stat-icon">&#9989;</span>
+                    <span id="tasks-completed">0</span>
+                </div>
+                <div class="stat-item" title="Daily streak">
+                    <span class="stat-icon">&#128293;</span>
+                    <span id="streak-count">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-icon">&#127942;</span>
+                    <span id="achievements-count">0</span>
+                </div>
+            </div>
+
+            <!-- Settings group - visually separated -->
+            <div class="settings-group">
+                <button class="icon-btn" id="sound-toggle" title="Toggle sound">
+                    <span id="sound-icon">&#128264;</span>
+                </button>
+                <button class="icon-btn" id="theme-toggle" title="Toggle theme">
+                    <span id="theme-icon">&#9728;</span>
+                </button>
+            </div>
+
+        </header>
+
+        <!-- Main content -->
+        <main class="main-content">
+            <!-- Add task form -->
+            <form class="add-task-form" id="add-task-form">
+                <div class="input-wrapper">
+                    <input
+                        type="text"
+                        id="task-input"
+                        placeholder="What quest awaits you today?"
+                        autocomplete="off"
+                        maxlength="100"
+                    >
+                    <button type="submit" class="add-btn" id="add-btn">
+                        <span class="btn-icon">+</span>
+                        <span class="btn-text">Add Quest</span>
+                    </button>
+                </div>
+            </form>
+
+            <!-- Tasks list -->
+            <div class="tasks-section">
+                <h2 class="section-title">
+                    <span class="title-icon">&#128221;</span>
+                    Active Quests
+                    <span class="task-count" id="task-count">(0)</span>
+                </h2>
+
+                <ul class="tasks-list" id="tasks-list">
+                    <!-- Tasks will be rendered here -->
+                </ul>
+
+                <div class="empty-state" id="empty-state">
+                    <div class="empty-icon">&#127919;</div>
+                    <p>No quests yet!</p>
+                    <p class="empty-hint">Add your first quest above</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- Achievements panel -->
+        <aside class="achievements-panel" id="achievements-panel">
+            <h3 class="panel-title">
+                <span>&#127942;</span> Achievements
+            </h3>
+            <div class="achievements-grid" id="achievements-grid">
+                <!-- Achievements will be rendered here -->
+            </div>
+        </aside>
+
+        <!-- Achievement popup -->
+        <div class="achievement-popup" id="achievement-popup">
+            <div class="popup-content">
+                <div class="popup-icon" id="popup-icon">&#127942;</div>
+                <div class="popup-title">Achievement Unlocked!</div>
+                <div class="popup-name" id="popup-name"></div>
+                <div class="popup-desc" id="popup-desc"></div>
+            </div>
+        </div>
+
+        <!-- Level up popup -->
+        <div class="levelup-popup" id="levelup-popup">
+            <div class="levelup-content">
+                <div class="levelup-stars">&#10024; &#10024; &#10024;</div>
+                <div class="levelup-title">LEVEL UP!</div>
+                <div class="levelup-level">Level <span id="new-level">2</span></div>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
