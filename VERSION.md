@@ -13,7 +13,7 @@ git push origin master --force
 
 # UPDATE
 git add .
-git commit -m "v0.0.13 - добавлены скриншоты текущей версии и ссылка на сайт"
+git commit -m "v0.0.13 - test 1"
 git push
 
 # DEV LOG
