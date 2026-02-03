@@ -23,6 +23,11 @@ if not app.secret_key:
 
 csrf = CSRFProtect(app)
 
+@app.after_request
+def no_cache(response):
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 BRANCH = os.environ.get("BRANCH", "master")
 

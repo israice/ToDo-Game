@@ -13,7 +13,7 @@ git push origin master --force
 
 # UPDATE
 git add .
-git commit -m "v0.0.4 - auto version update in page"
+git commit -m "v0.0.4 - test 1"
 git push
 
 # DEV LOG
