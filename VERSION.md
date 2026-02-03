@@ -13,7 +13,7 @@ git push origin master --force
 
 # UPDATE
 git add .
-git commit -m "v0.0.15 - добавлина соц сеть"
+git commit -m "v0.0.15 - test 1"
 git push
 
 # DEV LOG

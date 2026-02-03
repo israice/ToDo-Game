@@ -160,11 +160,6 @@ body {
     &.show { opacity: 1; visibility: visible; transform: translateY(0) scale(1); }
   }
 
-  .settings-user {
-    display: flex; align-items: center; gap: var(--spacing-sm);
-    padding: var(--spacing-sm) var(--spacing-md); color: var(--text-primary);
-    font-weight: 600; font-size: 0.9rem;
-  }
   .user-icon {
     display: inline-block; width: 1.2em; height: 1.2em;
     background-color: var(--accent-success);
