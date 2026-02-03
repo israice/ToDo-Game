@@ -75,6 +75,21 @@ def init_db():
                 id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, text TEXT NOT NULL,
                 xp_reward INTEGER NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE);
+            CREATE TABLE IF NOT EXISTS friendships (
+                id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, friend_id INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (friend_id) REFERENCES users(id) ON DELETE CASCADE,
+                UNIQUE(user_id, friend_id));
+            CREATE INDEX IF NOT EXISTS idx_friendships_user ON friendships(user_id);
+            CREATE INDEX IF NOT EXISTS idx_friendships_friend ON friendships(friend_id);
+            CREATE TABLE IF NOT EXISTS activity_log (
+                id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, activity_type TEXT NOT NULL,
+                task_text TEXT, xp_earned INTEGER DEFAULT 0, extra_data TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE);
+            CREATE INDEX IF NOT EXISTS idx_activity_user ON activity_log(user_id);
+            CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_log(created_at DESC);
         ''')
 
 def with_db(f):
@@ -85,6 +100,9 @@ def with_db(f):
             return jsonify({'error': 'Не авторизован'}), 401
         with get_db() as conn:
             user = conn.execute('SELECT id FROM users WHERE username = ?', (session['user'],)).fetchone()
+            if not user:
+                session.pop('user', None)
+                return jsonify({'error': 'Не авторизован'}), 401
             return f(conn, user['id'], *args, **kwargs)
     return decorated
 
@@ -268,6 +286,11 @@ def api_complete_task(conn, user_id, task_id):
     conn.execute('''UPDATE user_progress SET level=?, xp=?, xp_max=?, completed_tasks=?,
                     current_streak=?, combo=?, last_completion_date=? WHERE user_id=?''',
                  (new_level, new_xp, new_xp_max, new_completed, new_streak, combo, today, user_id))
+
+    # Log activity for friends feed
+    conn.execute('''INSERT INTO activity_log (user_id, activity_type, task_text, xp_earned)
+                    VALUES (?, 'task_completed', ?, ?)''', (user_id, task['text'], xp_earned))
+
     conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
     conn.commit()
 
@@ -284,6 +307,215 @@ def api_reset_combo(conn, user_id):
     conn.execute('UPDATE user_progress SET combo = 0 WHERE user_id = ?', (user_id,))
     conn.commit()
     return jsonify({'success': True})
+
+# ============== Friends API ==============
+
+@app.route('/api/users/search')
+@with_db
+def api_search_users(conn, user_id):
+    query = request.args.get('q', '').strip()
+    if len(query) < 2:
+        return jsonify({'users': []})
+
+    users = conn.execute('''
+        SELECT u.id, u.username, COALESCE(p.level, 1) as level
+        FROM users u
+        LEFT JOIN user_progress p ON u.id = p.user_id
+        WHERE u.username LIKE ? AND u.id != ?
+        LIMIT 20
+    ''', (f'%{query}%', user_id)).fetchall()
+
+    result = []
+    for u in users:
+        friendship = conn.execute('''
+            SELECT status, user_id FROM friendships
+            WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)
+        ''', (user_id, u['id'], u['id'], user_id)).fetchone()
+
+        status = None
+        if friendship:
+            if friendship['status'] == 'accepted':
+                status = 'friends'
+            elif friendship['user_id'] == user_id:
+                status = 'pending_sent'
+            else:
+                status = 'pending_received'
+
+        result.append({
+            'id': u['id'],
+            'username': u['username'],
+            'level': u['level'],
+            'avatar_letter': u['username'][0].upper(),
+            'friendship_status': status
+        })
+
+    return jsonify({'users': result})
+
+@app.route('/api/friends')
+@with_db
+def api_get_friends(conn, user_id):
+    incoming = conn.execute('''
+        SELECT f.id, f.user_id, u.username, COALESCE(p.level, 1) as level, f.created_at
+        FROM friendships f
+        JOIN users u ON f.user_id = u.id
+        LEFT JOIN user_progress p ON u.id = p.user_id
+        WHERE f.friend_id = ? AND f.status = 'pending'
+        ORDER BY f.created_at DESC
+    ''', (user_id,)).fetchall()
+
+    outgoing = conn.execute('''
+        SELECT f.id, f.friend_id as user_id, u.username, COALESCE(p.level, 1) as level, f.created_at
+        FROM friendships f
+        JOIN users u ON f.friend_id = u.id
+        LEFT JOIN user_progress p ON u.id = p.user_id
+        WHERE f.user_id = ? AND f.status = 'pending'
+        ORDER BY f.created_at DESC
+    ''', (user_id,)).fetchall()
+
+    friends = conn.execute('''
+        SELECT u.id, u.username, COALESCE(p.level, 1) as level
+        FROM friendships f
+        JOIN users u ON (CASE WHEN f.user_id = ? THEN f.friend_id ELSE f.user_id END) = u.id
+        LEFT JOIN user_progress p ON u.id = p.user_id
+        WHERE (f.user_id = ? OR f.friend_id = ?) AND f.status = 'accepted'
+    ''', (user_id, user_id, user_id)).fetchall()
+
+    return jsonify({
+        'incoming': [{'id': r['id'], 'user_id': r['user_id'], 'username': r['username'],
+                      'level': r['level'], 'avatar_letter': r['username'][0].upper(),
+                      'created_at': r['created_at']} for r in incoming],
+        'outgoing': [{'id': r['id'], 'user_id': r['user_id'], 'username': r['username'],
+                      'level': r['level'], 'avatar_letter': r['username'][0].upper(),
+                      'created_at': r['created_at']} for r in outgoing],
+        'friends': [{'id': r['id'], 'username': r['username'], 'level': r['level'],
+                     'avatar_letter': r['username'][0].upper()} for r in friends]
+    })
+
+@app.route('/api/friends/request', methods=['POST'])
+@csrf.exempt
+@with_db
+def api_send_friend_request(conn, user_id):
+    data = request.get_json()
+    friend_id = data.get('user_id')
+
+    if not friend_id or friend_id == user_id:
+        return jsonify({'error': 'Некорректный запрос'}), 400
+
+    friend = conn.execute('SELECT id FROM users WHERE id = ?', (friend_id,)).fetchone()
+    if not friend:
+        return jsonify({'error': 'Пользователь не найден'}), 404
+
+    existing = conn.execute('''
+        SELECT status FROM friendships
+        WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)
+    ''', (user_id, friend_id, friend_id, user_id)).fetchone()
+
+    if existing:
+        if existing['status'] == 'accepted':
+            return jsonify({'error': 'Вы уже друзья'}), 400
+        return jsonify({'error': 'Заявка уже существует'}), 400
+
+    conn.execute('INSERT INTO friendships (user_id, friend_id) VALUES (?, ?)', (user_id, friend_id))
+    conn.commit()
+    return jsonify({'success': True, 'message': 'Заявка отправлена'})
+
+@app.route('/api/friends/respond', methods=['POST'])
+@csrf.exempt
+@with_db
+def api_respond_friend_request(conn, user_id):
+    data = request.get_json()
+    request_id = data.get('request_id')
+    action = data.get('action')
+
+    if action not in ('accept', 'reject'):
+        return jsonify({'error': 'Некорректное действие'}), 400
+
+    request_row = conn.execute('''
+        SELECT * FROM friendships WHERE id = ? AND friend_id = ? AND status = 'pending'
+    ''', (request_id, user_id)).fetchone()
+
+    if not request_row:
+        return jsonify({'error': 'Заявка не найдена'}), 404
+
+    new_status = 'accepted' if action == 'accept' else 'rejected'
+    conn.execute('UPDATE friendships SET status = ? WHERE id = ?', (new_status, request_id))
+    conn.commit()
+
+    message = 'Заявка принята' if action == 'accept' else 'Заявка отклонена'
+    return jsonify({'success': True, 'message': message})
+
+@app.route('/api/friends/request/<int:request_id>', methods=['DELETE'])
+@csrf.exempt
+@with_db
+def api_cancel_friend_request(conn, user_id, request_id):
+    result = conn.execute('''
+        DELETE FROM friendships WHERE id = ? AND user_id = ? AND status = 'pending'
+    ''', (request_id, user_id))
+    conn.commit()
+
+    if result.rowcount == 0:
+        return jsonify({'error': 'Заявка не найдена'}), 404
+    return jsonify({'success': True})
+
+@app.route('/api/friends/<int:friend_id>', methods=['DELETE'])
+@csrf.exempt
+@with_db
+def api_remove_friend(conn, user_id, friend_id):
+    result = conn.execute('''
+        DELETE FROM friendships
+        WHERE ((user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?))
+        AND status = 'accepted'
+    ''', (user_id, friend_id, friend_id, user_id))
+    conn.commit()
+
+    if result.rowcount == 0:
+        return jsonify({'error': 'Пользователь не в друзьях'}), 404
+    return jsonify({'success': True})
+
+@app.route('/api/friends/feed')
+@with_db
+def api_friends_feed(conn, user_id):
+    limit = min(int(request.args.get('limit', 20)), 50)
+    offset = int(request.args.get('offset', 0))
+
+    friend_ids = conn.execute('''
+        SELECT CASE WHEN user_id = ? THEN friend_id ELSE user_id END as fid
+        FROM friendships
+        WHERE (user_id = ? OR friend_id = ?) AND status = 'accepted'
+    ''', (user_id, user_id, user_id)).fetchall()
+
+    if not friend_ids:
+        return jsonify({'feed': [], 'has_more': False})
+
+    ids = [f['fid'] for f in friend_ids]
+    placeholders = ','.join('?' * len(ids))
+
+    feed = conn.execute(f'''
+        SELECT a.*, u.username
+        FROM activity_log a
+        JOIN users u ON a.user_id = u.id
+        WHERE a.user_id IN ({placeholders})
+        ORDER BY a.created_at DESC
+        LIMIT ? OFFSET ?
+    ''', ids + [limit + 1, offset]).fetchall()
+
+    has_more = len(feed) > limit
+    feed = feed[:limit]
+
+    return jsonify({
+        'feed': [{
+            'id': f['id'],
+            'user_id': f['user_id'],
+            'username': f['username'],
+            'avatar_letter': f['username'][0].upper(),
+            'activity_type': f['activity_type'],
+            'task_text': f['task_text'],
+            'xp_earned': f['xp_earned'],
+            'extra_data': f['extra_data'],
+            'created_at': f['created_at']
+        } for f in feed],
+        'has_more': has_more
+    })
 
 # ============== Webhook ==============
 

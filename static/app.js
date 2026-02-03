@@ -345,6 +345,7 @@ function initTabs() {
 
       // Render content if needed
       if (tabId === 'history') renderHistory();
+      if (tabId === 'social') loadFriendsData();
     });
   });
 }
@@ -370,6 +371,9 @@ function initSubTabs() {
       subtabContents.forEach(content => {
         content.style.display = content.id === `subtab-${subtabId}` ? 'block' : 'none';
       });
+
+      // Load friends data when switching to friends subtab
+      if (subtabId === 'friends') loadFriendsData();
     });
   });
 }
@@ -436,6 +440,318 @@ function formatTime(timestamp) {
   return `${day} ${time}`;
 }
 
+// ========== FRIENDS API ==========
+let feedOffset = 0;
+let feedHasMore = false;
+
+async function searchUsers(query) {
+  if (query.length < 2) return { users: [] };
+  return await api(`/api/users/search?q=${encodeURIComponent(query)}`);
+}
+
+async function getFriends() {
+  return await api('/api/friends');
+}
+
+async function sendFriendRequest(userId) {
+  return await api('/api/friends/request', {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId })
+  });
+}
+
+async function respondToRequest(requestId, action) {
+  return await api('/api/friends/respond', {
+    method: 'POST',
+    body: JSON.stringify({ request_id: requestId, action })
+  });
+}
+
+async function cancelFriendRequest(requestId) {
+  return await api(`/api/friends/request/${requestId}`, { method: 'DELETE' });
+}
+
+async function getFriendsFeed(limit = 20, offset = 0) {
+  return await api(`/api/friends/feed?limit=${limit}&offset=${offset}`);
+}
+
+// ========== FRIENDS RENDERING ==========
+function renderSearchResults(users) {
+  const container = $('search-results');
+  const empty = $('search-empty');
+
+  if (!users || users.length === 0) {
+    container.innerHTML = '';
+    empty.classList.add('show');
+    return;
+  }
+
+  empty.classList.remove('show');
+  container.innerHTML = users.map(user => {
+    let btnClass = 'add-friend-btn';
+    let btnText = 'Добавить';
+    let btnDisabled = '';
+
+    if (user.friendship_status === 'friends') {
+      btnClass += ' disabled';
+      btnText = 'В друзьях';
+      btnDisabled = 'disabled';
+    } else if (user.friendship_status === 'pending_sent') {
+      btnClass += ' pending';
+      btnText = 'Ожидает';
+      btnDisabled = 'disabled';
+    } else if (user.friendship_status === 'pending_received') {
+      btnClass += ' accept';
+      btnText = 'Принять';
+    }
+
+    return `
+      <div class="user-card" data-user-id="${user.id}">
+        <div class="social-avatar">${esc(user.avatar_letter)}</div>
+        <div class="user-info">
+          <span class="user-name">${esc(user.username)}</span>
+          <span class="user-level">Уровень ${user.level}</span>
+        </div>
+        <button class="${btnClass}" data-user-id="${user.id}" data-status="${user.friendship_status || ''}" ${btnDisabled}>
+          ${btnText}
+        </button>
+      </div>`;
+  }).join('');
+
+  // Add click handlers
+  container.querySelectorAll('.add-friend-btn:not([disabled])').forEach(btn => {
+    btn.onclick = async () => {
+      const userId = parseInt(btn.dataset.userId);
+      const status = btn.dataset.status;
+
+      if (status === 'pending_received') {
+        // Accept incoming request - need to find request id
+        const friendsData = await getFriends();
+        const req = friendsData.incoming.find(r => r.user_id === userId);
+        if (req) {
+          await respondToRequest(req.id, 'accept');
+          btn.classList.remove('accept');
+          btn.classList.add('disabled');
+          btn.textContent = 'В друзьях';
+          btn.disabled = true;
+        }
+      } else {
+        // Send friend request
+        const result = await sendFriendRequest(userId);
+        if (result && result.success) {
+          btn.classList.add('pending');
+          btn.textContent = 'Ожидает';
+          btn.disabled = true;
+        }
+      }
+    };
+  });
+}
+
+async function loadFriendsData() {
+  const data = await getFriends();
+  if (!data) return;
+
+  const incomingSection = $('incoming-requests-section');
+  const outgoingSection = $('outgoing-requests-section');
+  const incomingList = $('incoming-requests');
+  const outgoingList = $('outgoing-requests');
+  const incomingCount = $('incoming-count');
+  const friendsEmpty = $('friends-empty');
+
+  // Render incoming requests
+  if (data.incoming && data.incoming.length > 0) {
+    incomingSection.style.display = 'block';
+    incomingCount.textContent = data.incoming.length;
+    incomingList.innerHTML = data.incoming.map(req => `
+      <div class="request-item" data-request-id="${req.id}">
+        <div class="social-avatar">${esc(req.avatar_letter)}</div>
+        <div class="request-info">
+          <span class="user-name">${esc(req.username)}</span>
+          <span class="request-time">${formatRelativeTime(req.created_at)}</span>
+        </div>
+        <div class="request-actions">
+          <button class="accept-btn" title="Принять">&#10004;</button>
+          <button class="reject-btn" title="Отклонить">&#10006;</button>
+        </div>
+      </div>`).join('');
+
+    // Add handlers
+    incomingList.querySelectorAll('.request-item').forEach(item => {
+      const reqId = parseInt(item.dataset.requestId);
+      item.querySelector('.accept-btn').onclick = async () => {
+        await respondToRequest(reqId, 'accept');
+        item.remove();
+        const remaining = incomingList.children.length;
+        incomingCount.textContent = remaining;
+        if (remaining === 0) incomingSection.style.display = 'none';
+        loadFriendsFeed();
+      };
+      item.querySelector('.reject-btn').onclick = async () => {
+        await respondToRequest(reqId, 'reject');
+        item.remove();
+        const remaining = incomingList.children.length;
+        incomingCount.textContent = remaining;
+        if (remaining === 0) incomingSection.style.display = 'none';
+      };
+    });
+  } else {
+    incomingSection.style.display = 'none';
+  }
+
+  // Render outgoing requests
+  if (data.outgoing && data.outgoing.length > 0) {
+    outgoingSection.style.display = 'block';
+    outgoingList.innerHTML = data.outgoing.map(req => `
+      <div class="request-item outgoing" data-request-id="${req.id}">
+        <div class="social-avatar">${esc(req.avatar_letter)}</div>
+        <div class="request-info">
+          <span class="user-name">${esc(req.username)}</span>
+          <span class="request-status">Ожидает ответа</span>
+        </div>
+        <button class="cancel-btn" title="Отменить">&#10006;</button>
+      </div>`).join('');
+
+    // Add handlers
+    outgoingList.querySelectorAll('.request-item').forEach(item => {
+      const reqId = parseInt(item.dataset.requestId);
+      item.querySelector('.cancel-btn').onclick = async () => {
+        await cancelFriendRequest(reqId);
+        item.remove();
+        if (outgoingList.children.length === 0) outgoingSection.style.display = 'none';
+      };
+    });
+  } else {
+    outgoingSection.style.display = 'none';
+  }
+
+  // Load friends feed
+  await loadFriendsFeed();
+
+  // Show/hide empty state - hide if there are requests OR friends with activity
+  const hasRequests = (data.incoming && data.incoming.length > 0) ||
+                      (data.outgoing && data.outgoing.length > 0);
+  const hasFeed = $('friends-feed').children.length > 0;
+
+  friendsEmpty.style.display = (hasRequests || hasFeed) ? 'none' : 'block';
+  friendsEmpty.classList.toggle('show', !hasRequests && !hasFeed);
+}
+
+async function loadFriendsFeed(append = false) {
+  if (!append) feedOffset = 0;
+
+  const feedData = await getFriendsFeed(20, feedOffset);
+  if (!feedData) return;
+
+  feedHasMore = feedData.has_more;
+  renderFriendsFeed(feedData.feed || [], append);
+
+  const loadMoreBtn = $('load-more-feed');
+  loadMoreBtn.style.display = feedHasMore ? 'block' : 'none';
+}
+
+function renderFriendsFeed(feed, append = false) {
+  const container = $('friends-feed');
+  const friendsEmpty = $('friends-empty');
+
+  if (!append) container.innerHTML = '';
+
+  if (feed.length === 0 && !append) {
+    return;
+  }
+
+  const html = feed.map(item => {
+    let actionText = '';
+    if (item.activity_type === 'task_completed') {
+      actionText = `выполнил задание: "${esc(item.task_text || '')}"`;
+    } else if (item.activity_type === 'achievement') {
+      actionText = 'получил достижение';
+    } else if (item.activity_type === 'level_up') {
+      actionText = 'повысил уровень';
+    }
+
+    return `
+      <div class="social-item">
+        <div class="social-avatar">${esc(item.avatar_letter)}</div>
+        <div class="social-content">
+          <span class="social-user">${esc(item.username)}</span>
+          <span class="social-action">${actionText}</span>
+          <div class="social-meta">
+            <span class="social-xp">+${item.xp_earned} XP</span>
+            <span class="social-time">${formatRelativeTime(item.created_at)}</span>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  if (append) {
+    container.innerHTML += html;
+  } else {
+    container.innerHTML = html;
+  }
+
+  if (container.children.length > 0) {
+    friendsEmpty.classList.remove('show');
+  }
+}
+
+function formatRelativeTime(timestamp) {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return 'только что';
+  if (diffMins < 60) return `${diffMins} мин. назад`;
+  if (diffHours < 24) return `${diffHours} ч. назад`;
+  if (diffDays < 7) return `${diffDays} дн. назад`;
+  return formatTime(timestamp);
+}
+
+// ========== SEARCH INIT ==========
+function initSearch() {
+  const searchInput = $('user-search-input');
+  const searchBtn = $('user-search-btn');
+
+  if (!searchInput) return;
+
+  const debouncedSearch = debounce(async (query) => {
+    if (query.length < 2) {
+      renderSearchResults([]);
+      return;
+    }
+    const result = await searchUsers(query);
+    renderSearchResults(result?.users || []);
+  }, 300);
+
+  searchInput.addEventListener('input', (e) => {
+    debouncedSearch(e.target.value.trim());
+  });
+
+  searchBtn.addEventListener('click', async () => {
+    const query = searchInput.value.trim();
+    if (query.length >= 2) {
+      const result = await searchUsers(query);
+      renderSearchResults(result?.users || []);
+    }
+  });
+
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      searchBtn.click();
+    }
+  });
+}
+
+// ========== LOAD MORE FEED ==========
+$('load-more-feed')?.addEventListener('click', async () => {
+  feedOffset += 20;
+  await loadFriendsFeed(true);
+});
+
 // ========== HORIZONTAL SCROLL ==========
 $('achievements-grid')?.addEventListener('wheel', e => {
   if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
@@ -453,6 +769,7 @@ document.head.appendChild(style);
 // Initialize tabs
 initTabs();
 initSubTabs();
+initSearch();
 loadHistory();
 
 // Load state from server

@@ -161,21 +161,58 @@
             <div class="tab-content" id="tab-social" role="tabpanel" style="display: none;">
                 <!-- Sub-tab: FRIENDS (default) -->
                 <div class="subtab-content" id="subtab-friends" style="display: block;">
-                    <div class="social-feed" id="social-feed">
-                        <div class="empty-state show">
-                            <div class="empty-icon">&#128101;</div>
-                            <p>Лента активности друзей</p>
-                            <p class="empty-hint">Скоро здесь появятся обновления</p>
-                        </div>
+                    <!-- Incoming requests section -->
+                    <div class="friends-section" id="incoming-requests-section" style="display: none;">
+                        <h3 class="section-subtitle">
+                            <span>&#128229;</span> Входящие заявки
+                            <span class="badge" id="incoming-count">0</span>
+                        </h3>
+                        <div class="requests-list" id="incoming-requests"></div>
+                    </div>
+
+                    <!-- Outgoing requests section -->
+                    <div class="friends-section" id="outgoing-requests-section" style="display: none;">
+                        <h3 class="section-subtitle">
+                            <span>&#128228;</span> Исходящие заявки
+                        </h3>
+                        <div class="requests-list" id="outgoing-requests"></div>
+                    </div>
+
+                    <!-- Friends feed section -->
+                    <div class="friends-section" id="friends-feed-section">
+                        <h3 class="section-subtitle">
+                            <span>&#128101;</span> Лента друзей
+                        </h3>
+                        <div class="social-feed" id="friends-feed"></div>
+                        <button class="load-more-btn" id="load-more-feed" style="display: none;">
+                            Загрузить ещё
+                        </button>
+                    </div>
+
+                    <div class="empty-state" id="friends-empty">
+                        <div class="empty-icon">&#128101;</div>
+                        <p>У вас пока нет друзей</p>
+                        <p class="empty-hint">Найдите друзей во вкладке SEARCH</p>
                     </div>
                 </div>
 
                 <!-- Sub-tab: SEARCH -->
                 <div class="subtab-content" id="subtab-search" style="display: none;">
-                    <div class="empty-state show">
+                    <div class="search-container">
+                        <div class="search-input-wrapper">
+                            <input type="text" id="user-search-input"
+                                   placeholder="Введите username..."
+                                   autocomplete="off" minlength="2">
+                            <button class="search-btn" id="user-search-btn">
+                                <span>&#128269;</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="search-results" id="search-results"></div>
+                    <div class="empty-state show" id="search-empty">
                         <div class="empty-icon">&#128269;</div>
                         <p>Поиск пользователей</p>
-                        <p class="empty-hint">Скоро здесь можно будет найти друзей</p>
+                        <p class="empty-hint">Введите минимум 2 символа</p>
                     </div>
                 </div>
             </div>
