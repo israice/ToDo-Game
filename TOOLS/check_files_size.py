@@ -2,16 +2,18 @@ from pathlib import Path
 
 ROOT_DIR = Path(".")
 MIN_LINES = 250
-EXCLUDED_DIRS = {
-    ".build_cache",
-    ".git",
-    "png",
-    "ZIP",
-    "__pycache__",
-    "python",
-    }
+EXCLUDED_DIRS = """
+    .build_cache
+    .git
+    png
+    jpg
+    webm
+    ZIP
+    __pycache__
+    python
+""".split()
 
-EXCLUDED_EXTENSIONS = {".png", ".md"}
+EXCLUDED_EXTENSIONS = ".png .md .jpg".split()
 
 for path in ROOT_DIR.rglob("*"):
     # пропускаем файлы внутри исключённых директорий

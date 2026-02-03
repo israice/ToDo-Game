@@ -2,7 +2,7 @@ import os, math, uuid, random, hashlib, hmac, subprocess, sqlite3, logging
 from datetime import datetime, date
 from functools import wraps
 from contextlib import contextmanager
-from flask import Flask, request, redirect, session, render_template, jsonify
+from flask import Flask, request, redirect, session, render_template, jsonify, send_from_directory
 from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 import bcrypt
@@ -23,6 +23,11 @@ csrf = CSRFProtect(app)
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 BRANCH = os.environ.get("BRANCH", "master")
+
+# Media uploads configuration
+UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4', 'webm', 'mov'}
 
 ACHIEVEMENTS = [
     {'id': 'firstQuest', 'check': lambda s: s['completed'] >= 1},
@@ -90,6 +95,13 @@ def init_db():
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE);
             CREATE INDEX IF NOT EXISTS idx_activity_user ON activity_log(user_id);
             CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_log(created_at DESC);
+            CREATE TABLE IF NOT EXISTS task_media (
+                id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, user_id INTEGER NOT NULL,
+                media_type TEXT NOT NULL, filename TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                UNIQUE(task_id));
         ''')
 
 def with_db(f):
@@ -183,7 +195,10 @@ def logout():
 @with_db
 def api_get_state(conn, user_id):
     progress = get_or_create_progress(conn, user_id)
-    tasks = [{'id': t['id'], 'text': t['text'], 'xp': t['xp_reward']}
+    # Get media for tasks
+    media_map = {m['task_id']: {'type': m['media_type'], 'url': f"/uploads/{m['filename']}"}
+                 for m in conn.execute('SELECT task_id, media_type, filename FROM task_media WHERE user_id = ?', (user_id,))}
+    tasks = [{'id': t['id'], 'text': t['text'], 'xp': t['xp_reward'], 'media': media_map.get(t['id'])}
              for t in conn.execute('SELECT id, text, xp_reward FROM tasks WHERE user_id = ? ORDER BY created_at DESC', (user_id,))]
     achievements = {a['achievement_id']: True for a in conn.execute('SELECT achievement_id FROM user_achievements WHERE user_id = ?', (user_id,))}
     return jsonify({
@@ -287,9 +302,13 @@ def api_complete_task(conn, user_id, task_id):
                     current_streak=?, combo=?, last_completion_date=? WHERE user_id=?''',
                  (new_level, new_xp, new_xp_max, new_completed, new_streak, combo, today, user_id))
 
-    # Log activity for friends feed
-    conn.execute('''INSERT INTO activity_log (user_id, activity_type, task_text, xp_earned)
-                    VALUES (?, 'task_completed', ?, ?)''', (user_id, task['text'], xp_earned))
+    # Log activity for friends feed ONLY if task has media
+    media = conn.execute('SELECT media_type, filename FROM task_media WHERE task_id = ?', (task_id,)).fetchone()
+    if media:
+        import json as _json
+        extra_data = _json.dumps({'media_type': media['media_type'], 'media_url': f"/uploads/{media['filename']}"})
+        conn.execute('''INSERT INTO activity_log (user_id, activity_type, task_text, xp_earned, extra_data)
+                        VALUES (?, 'task_completed', ?, ?, ?)''', (user_id, task['text'], xp_earned, extra_data))
 
     conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
     conn.commit()
@@ -307,6 +326,67 @@ def api_reset_combo(conn, user_id):
     conn.execute('UPDATE user_progress SET combo = 0 WHERE user_id = ?', (user_id,))
     conn.commit()
     return jsonify({'success': True})
+
+# ============== Media API ==============
+
+@app.route('/api/tasks/<task_id>/media', methods=['POST'])
+@csrf.exempt
+@with_db
+def api_upload_media(conn, user_id, task_id):
+    task = conn.execute('SELECT id FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
+    if not task:
+        return jsonify({'error': 'Задача не найдена'}), 404
+
+    if 'file' not in request.files:
+        return jsonify({'error': 'Файл не найден'}), 400
+
+    file = request.files['file']
+    if not file.filename:
+        return jsonify({'error': 'Файл не выбран'}), 400
+
+    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+    if ext not in ALLOWED_EXTENSIONS:
+        return jsonify({'error': 'Недопустимый формат'}), 400
+
+    media_type = 'video' if ext in {'mp4', 'webm', 'mov'} else 'image'
+    filename = f"{task_id}_{uuid.uuid4().hex[:8]}.{ext}"
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+
+    # Delete old file if exists
+    old_media = conn.execute('SELECT filename FROM task_media WHERE task_id = ?', (task_id,)).fetchone()
+    if old_media:
+        old_path = os.path.join(UPLOAD_FOLDER, old_media['filename'])
+        if os.path.exists(old_path):
+            os.remove(old_path)
+        conn.execute('DELETE FROM task_media WHERE task_id = ?', (task_id,))
+
+    file.save(filepath)
+    conn.execute('INSERT INTO task_media (task_id, user_id, media_type, filename) VALUES (?, ?, ?, ?)',
+                 (task_id, user_id, media_type, filename))
+    conn.commit()
+
+    return jsonify({'success': True, 'media_type': media_type, 'url': f'/uploads/{filename}'})
+
+@app.route('/api/tasks/<task_id>/media', methods=['DELETE'])
+@csrf.exempt
+@with_db
+def api_delete_media(conn, user_id, task_id):
+    media = conn.execute('SELECT filename FROM task_media WHERE task_id = ? AND user_id = ?',
+                         (task_id, user_id)).fetchone()
+    if not media:
+        return jsonify({'error': 'Медиа не найдено'}), 404
+
+    filepath = os.path.join(UPLOAD_FOLDER, media['filename'])
+    if os.path.exists(filepath):
+        os.remove(filepath)
+
+    conn.execute('DELETE FROM task_media WHERE task_id = ?', (task_id,))
+    conn.commit()
+    return jsonify({'success': True})
+
+@app.route('/uploads/<filename>')
+def serve_upload(filename):
+    return send_from_directory(UPLOAD_FOLDER, filename)
 
 # ============== Friends API ==============
 
@@ -502,8 +582,10 @@ def api_friends_feed(conn, user_id):
     has_more = len(feed) > limit
     feed = feed[:limit]
 
-    return jsonify({
-        'feed': [{
+    import json as _json
+    result = []
+    for f in feed:
+        item = {
             'id': f['id'],
             'user_id': f['user_id'],
             'username': f['username'],
@@ -511,11 +593,15 @@ def api_friends_feed(conn, user_id):
             'activity_type': f['activity_type'],
             'task_text': f['task_text'],
             'xp_earned': f['xp_earned'],
-            'extra_data': f['extra_data'],
             'created_at': f['created_at']
-        } for f in feed],
-        'has_more': has_more
-    })
+        }
+        if f['extra_data']:
+            extra = _json.loads(f['extra_data'])
+            item['media_type'] = extra.get('media_type')
+            item['media_url'] = extra.get('media_url')
+        result.append(item)
+
+    return jsonify({'feed': result, 'has_more': has_more})
 
 # ============== Webhook ==============
 

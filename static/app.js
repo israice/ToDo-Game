@@ -19,6 +19,17 @@ let state = {
 let comboTimer = null;
 let audioCtx = null;
 
+// Media popup state
+let currentMediaTaskId = null;
+let cameraStream = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+
+// Video autoplay state
+let videoObserver = null;
+let isMobileDevice = false;
+const MOBILE_BREAKPOINT = 768;
+
 // ========== UTILITIES ==========
 function debounce(fn, delay) {
   let timer;
@@ -26,6 +37,16 @@ function debounce(fn, delay) {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), delay);
   };
+}
+
+// ========== DEVICE DETECTION ==========
+function checkIfMobile() {
+  const mediaQuery = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`);
+  isMobileDevice = mediaQuery.matches;
+  mediaQuery.addEventListener('change', (e) => {
+    isMobileDevice = e.matches;
+    reinitVideoHandlers();
+  });
 }
 
 // ========== ACHIEVEMENTS ==========
@@ -131,7 +152,17 @@ function renderTasks() {
     const li = document.createElement('li');
     li.className = 'task-item';
     li.dataset.id = task.id;
+
+    // Build media HTML
+    const mediaHtml = task.media
+      ? (task.media.type === 'image'
+        ? `<img src="${task.media.url}" alt="">`
+        : `<video src="${task.media.url}" muted></video>`)
+      : '🖼️';
+    const hasImageClass = task.media ? 'has-image' : '';
+
     li.innerHTML = `
+      <span class="task-media ${hasImageClass}">${mediaHtml}</span>
       <label class="task-checkbox"><input type="checkbox" aria-label="Выполнить квест"><span class="checkbox-custom"></span></label>
       <span class="task-text">${esc(task.text)}</span>
       <span class="task-xp">+${task.xp} XP</span>
@@ -139,6 +170,7 @@ function renderTasks() {
 
     li.querySelector('input').onchange = () => completeTask(task.id, li);
     li.querySelector('.task-delete').onclick = () => deleteTask(task.id, li);
+    li.querySelector('.task-media').onclick = () => openMediaPopup(task.id);
 
     const textEl = li.querySelector('.task-text');
     let original = task.text;
@@ -321,7 +353,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') sDrop.classL
 function initTabs() {
   const tabBtns = document.querySelectorAll('.tab-btn');
   const tabContents = document.querySelectorAll('.tab-content');
-  const subtabsNav = $('subtabs-nav');
+  const socialSearch = $('social-search');
 
   tabBtns.forEach(btn => {
     btn.addEventListener('click', () => {
@@ -340,8 +372,8 @@ function initTabs() {
         content.style.display = content.id === `tab-${tabId}` ? 'block' : 'none';
       });
 
-      // Show/hide subtabs for SOCIAL tab
-      subtabsNav.classList.toggle('show', tabId === 'social');
+      // Show/hide search for SOCIAL tab
+      socialSearch.classList.toggle('show', tabId === 'social');
 
       // Render content if needed
       if (tabId === 'history') renderHistory();
@@ -350,33 +382,6 @@ function initTabs() {
   });
 }
 
-// ========== SOCIAL SUB-TABS ==========
-function initSubTabs() {
-  const subtabBtns = document.querySelectorAll('.subtab-btn');
-  const subtabContents = document.querySelectorAll('.subtab-content');
-
-  subtabBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const subtabId = btn.dataset.subtab;
-
-      // Update active button
-      subtabBtns.forEach(b => {
-        b.classList.remove('active');
-        b.setAttribute('aria-selected', 'false');
-      });
-      btn.classList.add('active');
-      btn.setAttribute('aria-selected', 'true');
-
-      // Show selected content
-      subtabContents.forEach(content => {
-        content.style.display = content.id === `subtab-${subtabId}` ? 'block' : 'none';
-      });
-
-      // Load friends data when switching to friends subtab
-      if (subtabId === 'friends') loadFriendsData();
-    });
-  });
-}
 
 // ========== HISTORY ==========
 function addToHistory(action, points, icon = null) {
@@ -670,9 +675,19 @@ function renderFriendsFeed(feed, append = false) {
       actionText = 'повысил уровень';
     }
 
+    let mediaHtml = '';
+    if (item.media_url) {
+      if (item.media_type === 'image') {
+        mediaHtml = `<img class="social-media" src="${item.media_url}" alt="">`;
+      } else if (item.media_type === 'video') {
+        mediaHtml = `<div class="video-wrapper"><video class="social-media" src="${item.media_url}" muted playsinline preload="metadata"></video><div class="video-play-overlay"><span class="play-icon">▶</span></div></div>`;
+      }
+    }
+
     return `
       <div class="social-item">
         <div class="social-avatar">${esc(item.avatar_letter)}</div>
+        ${mediaHtml}
         <div class="social-content">
           <span class="social-user">${esc(item.username)}</span>
           <span class="social-action">${actionText}</span>
@@ -693,6 +708,9 @@ function renderFriendsFeed(feed, append = false) {
   if (container.children.length > 0) {
     friendsEmpty.classList.remove('show');
   }
+
+  // Initialize video autoplay handlers
+  initFeedVideos();
 }
 
 function formatRelativeTime(timestamp) {
@@ -760,15 +778,316 @@ $('achievements-grid')?.addEventListener('wheel', e => {
   }
 }, { passive: false });
 
+// ========== MEDIA POPUP ==========
+function openMediaPopup(taskId) {
+  currentMediaTaskId = taskId;
+  const popup = $('media-popup');
+  const preview = $('media-preview');
+  const cameraView = $('camera-view');
+
+  // Hide camera on open
+  cameraView.classList.add('hidden');
+  stopCamera();
+
+  // Find media for this task
+  const task = state.tasks.find(t => t.id === taskId);
+  const media = task?.media;
+
+  if (media) {
+    preview.innerHTML = media.type === 'image'
+      ? `<img src="${media.url}" alt="Media"><button class="delete-media-btn" onclick="deleteMedia()">🗑️ Удалить</button>`
+      : `<video src="${media.url}" controls></video><button class="delete-media-btn" onclick="deleteMedia()">🗑️ Удалить</button>`;
+    preview.classList.add('has-media');
+  } else {
+    preview.innerHTML = '';
+    preview.classList.remove('has-media');
+  }
+
+  popup.classList.add('show');
+}
+
+function closeMediaPopup() {
+  $('media-popup').classList.remove('show');
+  stopCamera();
+  currentMediaTaskId = null;
+}
+
+async function uploadMedia(file) {
+  if (!file || !currentMediaTaskId) return;
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await fetch(`/api/tasks/${currentMediaTaskId}/media`, {
+    method: 'POST',
+    body: formData
+  });
+
+  if (response.ok) {
+    const data = await response.json();
+    const task = state.tasks.find(t => t.id === currentMediaTaskId);
+    if (task) {
+      task.media = { type: data.media_type, url: data.url };
+    }
+    updateTaskMediaIcon(currentMediaTaskId);
+    closeMediaPopup();
+  }
+}
+
+function handleMediaSelect(event) {
+  const file = event.target.files[0];
+  uploadMedia(file);
+  event.target.value = '';
+}
+
+async function startCamera(forVideo = false) {
+  const cameraView = $('camera-view');
+  const video = $('camera-video');
+  const captureBtn = $('btn-camera-capture');
+
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' },
+      audio: forVideo
+    });
+    video.srcObject = cameraStream;
+    cameraView.classList.remove('hidden');
+    cameraView.dataset.mode = forVideo ? 'video' : 'photo';
+
+    if (forVideo) {
+      captureBtn.textContent = '🔴 Записать';
+      captureBtn.onclick = startVideoRecording;
+    } else {
+      captureBtn.textContent = '📸 Снять';
+      captureBtn.onclick = capturePhoto;
+    }
+  } catch (err) {
+    alert('Не удалось получить доступ к камере');
+    console.error(err);
+  }
+}
+
+function stopCamera() {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(track => track.stop());
+    cameraStream = null;
+  }
+  const video = $('camera-video');
+  if (video) video.srcObject = null;
+}
+
+function capturePhoto() {
+  const video = $('camera-video');
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+
+  canvas.toBlob(blob => {
+    const file = new File([blob], 'photo.jpg', { type: 'image/jpeg' });
+    uploadMedia(file);
+  }, 'image/jpeg', 0.9);
+}
+
+function startVideoRecording() {
+  recordedChunks = [];
+  mediaRecorder = new MediaRecorder(cameraStream, { mimeType: 'video/webm' });
+
+  mediaRecorder.ondataavailable = e => {
+    if (e.data.size > 0) recordedChunks.push(e.data);
+  };
+
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+    const file = new File([blob], 'video.webm', { type: 'video/webm' });
+    uploadMedia(file);
+  };
+
+  mediaRecorder.start();
+  $('btn-camera-capture').textContent = '⏹️ Стоп';
+  $('btn-camera-capture').onclick = stopVideoRecording;
+}
+
+function stopVideoRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+}
+
+function updateTaskMediaIcon(taskId) {
+  const taskItem = document.querySelector(`.task-item[data-id="${taskId}"]`);
+  if (!taskItem) return;
+
+  const mediaEl = taskItem.querySelector('.task-media');
+  const task = state.tasks.find(t => t.id === taskId);
+  const media = task?.media;
+
+  if (media) {
+    mediaEl.innerHTML = media.type === 'image'
+      ? `<img src="${media.url}" alt="Task media">`
+      : `<video src="${media.url}" muted></video>`;
+    mediaEl.classList.add('has-image');
+  } else {
+    mediaEl.innerHTML = '🖼️';
+    mediaEl.classList.remove('has-image');
+  }
+}
+
+async function deleteMedia() {
+  if (!currentMediaTaskId) return;
+
+  const response = await fetch(`/api/tasks/${currentMediaTaskId}/media`, {
+    method: 'DELETE'
+  });
+
+  if (response.ok) {
+    const task = state.tasks.find(t => t.id === currentMediaTaskId);
+    if (task) delete task.media;
+    updateTaskMediaIcon(currentMediaTaskId);
+    closeMediaPopup();
+  }
+}
+
+// Media popup event listeners
+$('media-file-input')?.addEventListener('change', handleMediaSelect);
+$('btn-add-media')?.addEventListener('click', () => $('media-file-input').click());
+$('btn-take-photo')?.addEventListener('click', () => startCamera(false));
+$('btn-take-video')?.addEventListener('click', () => startCamera(true));
+$('media-popup-close')?.addEventListener('click', closeMediaPopup);
+$('media-popup')?.addEventListener('click', e => {
+  if (e.target.id === 'media-popup') closeMediaPopup();
+});
+$('btn-camera-cancel')?.addEventListener('click', () => {
+  $('camera-view').classList.add('hidden');
+  stopCamera();
+});
+
+// ========== VIDEO AUTOPLAY HANDLERS ==========
+function playVideoMuted(video) {
+  if (!video || !video.paused) return;
+  video.muted = true;
+  const wrapper = video.closest('.video-wrapper');
+  video.play()
+    .then(() => { if (wrapper) wrapper.classList.add('playing'); })
+    .catch(() => {});
+}
+
+function pauseVideo(video) {
+  if (!video || video.paused) return;
+  video.pause();
+  const wrapper = video.closest('.video-wrapper');
+  if (wrapper) wrapper.classList.remove('playing');
+}
+
+function initMobileVideoObserver() {
+  if (videoObserver) videoObserver.disconnect();
+  videoObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      const video = entry.target;
+      if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+        playVideoMuted(video);
+      } else {
+        pauseVideo(video);
+      }
+    });
+  }, { threshold: [0, 0.5, 1.0] });
+}
+
+function addDesktopVideoHandlers(video) {
+  video.addEventListener('mouseenter', () => { if (!isMobileDevice) playVideoMuted(video); });
+  video.addEventListener('mouseleave', () => { if (!isMobileDevice) pauseVideo(video); });
+}
+
+function openVideoFullscreen(src) {
+  const lightbox = $('social-lightbox');
+  const content = $('social-lightbox-content');
+  content.innerHTML = `<video src="${src}" autoplay playsinline></video>`;
+  const video = content.querySelector('video');
+  video.currentTime = 0;
+  video.muted = false;
+
+  // Apply fullscreen to container, not video - this hides browser controls
+  if (content.requestFullscreen) {
+    content.requestFullscreen().catch(() => {});
+  } else if (content.webkitRequestFullscreen) {
+    content.webkitRequestFullscreen();
+  }
+  lightbox.classList.add('show');
+}
+
+function initFeedVideos() {
+  const container = $('friends-feed');
+  if (!container) return;
+  const videos = container.querySelectorAll('video.social-media');
+  videos.forEach(video => {
+    addDesktopVideoHandlers(video);
+    if (isMobileDevice && videoObserver) {
+      videoObserver.observe(video);
+    }
+  });
+}
+
+function reinitVideoHandlers() {
+  const container = $('friends-feed');
+  if (!container) return;
+  const videos = container.querySelectorAll('video.social-media');
+  if (videoObserver) videoObserver.disconnect();
+  videos.forEach(video => pauseVideo(video));
+  if (isMobileDevice) {
+    initMobileVideoObserver();
+    videos.forEach(video => videoObserver.observe(video));
+  }
+}
+
+// ========== SOCIAL LIGHTBOX ==========
+function openSocialLightbox(src, isVideo) {
+  const lightbox = $('social-lightbox');
+  const content = $('social-lightbox-content');
+  if (isVideo) {
+    content.innerHTML = `<video src="${src}" autoplay playsinline></video>`;
+  } else {
+    content.innerHTML = `<img src="${src}" alt="">`;
+  }
+  lightbox.classList.add('show');
+}
+
+function closeSocialLightbox() {
+  const lightbox = $('social-lightbox');
+  const content = $('social-lightbox-content');
+  const video = content.querySelector('video');
+  if (video) video.pause();
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  lightbox.classList.remove('show');
+  content.innerHTML = '';
+}
+
+$('social-lightbox')?.addEventListener('click', closeSocialLightbox);
+
+// Delegate clicks on .social-media in feed
+$('friends-feed')?.addEventListener('click', e => {
+  const media = e.target.closest('.social-media');
+  if (media) {
+    e.stopPropagation();
+    if (media.tagName === 'VIDEO') {
+      openVideoFullscreen(media.src);
+    } else {
+      openSocialLightbox(media.src, false);
+    }
+  }
+});
+
 // ========== INIT ==========
 // Inject particle animation
 const style = document.createElement('style');
 style.textContent = `@keyframes particle-float{0%{opacity:1;transform:translate(0,0) scale(1) rotate(0)}100%{opacity:0;transform:translate(var(--tx,0),var(--ty,-100px)) scale(0) rotate(360deg)}}`;
 document.head.appendChild(style);
 
+// Initialize device detection and video observer
+checkIfMobile();
+if (isMobileDevice) initMobileVideoObserver();
+
 // Initialize tabs
 initTabs();
-initSubTabs();
 initSearch();
 loadHistory();
 
