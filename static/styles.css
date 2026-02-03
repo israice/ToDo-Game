@@ -63,7 +63,8 @@ body {
 /* ===== HEADER ===== */
 .game-header {
   position: sticky; top: 0; z-index: 50;
-  display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacing-sm);
+  display: flex; flex-wrap: nowrap; align-items: center; gap: var(--spacing-sm);
+  overflow: hidden;
   padding: var(--spacing-sm) var(--spacing-md);
   background: var(--bg-secondary); border-radius: 12px; margin-bottom: var(--spacing-md);
   border: 1px solid var(--border-color); box-shadow: 0 4px 20px rgba(0,0,0,0.3);
@@ -72,12 +73,12 @@ body {
     display: flex; align-items: center; gap: var(--spacing-xs);
     background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
     padding: 6px 12px; border-radius: 20px; font-weight: 700; font-size: 0.85rem;
-    white-space: nowrap; flex-shrink: 0;
+    white-space: nowrap; flex-shrink: 1; min-width: 0;
 
     .level-icon { font-size: 1rem; animation: spin 3s linear infinite; }
   }
 
-  .xp-container { flex: 1; min-width: 80px; max-width: 200px; }
+  .xp-container { flex: 1 1 0; min-width: 50px; max-width: 200px; }
 
   .xp-bar {
     position: relative; height: 20px; background: var(--bg-card);
@@ -103,7 +104,7 @@ body {
 
   .combo-container {
     display: none; align-items: center; gap: 2px; padding: 4px 8px;
-    background: var(--bg-card); border-radius: 12px; border: 1px solid var(--accent-fire); flex-shrink: 0;
+    background: var(--bg-card); border-radius: 12px; border: 1px solid var(--accent-fire); flex-shrink: 1; min-width: 0;
 
     &.active { display: flex; animation: pulse 0.5s ease; }
     .combo-fire { font-size: 0.9rem; animation: flicker 0.3s ease-in-out infinite alternate; }
@@ -111,14 +112,15 @@ body {
   }
 
   .header-right {
-    display: flex; align-items: center; gap: var(--spacing-sm); margin-left: auto; flex-shrink: 0;
+    display: flex; align-items: center; gap: var(--spacing-sm); margin-left: auto; flex-shrink: 1; min-width: 0;
 
     .stats-mini {
-      display: flex; gap: var(--spacing-xs);
+      display: flex; gap: var(--spacing-xs); flex-shrink: 1; min-width: 0; overflow: hidden;
 
       .stat-item {
         display: flex; align-items: center; gap: 2px; padding: 4px 8px;
         background: var(--bg-card); border-radius: 8px; font-weight: 600; font-size: 0.8rem;
+        flex-shrink: 1; min-width: 0; white-space: nowrap;
       }
       .stat-icon { font-size: 0.85rem; }
     }
