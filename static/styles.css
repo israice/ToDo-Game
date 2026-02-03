@@ -99,6 +99,8 @@ body {
   .level-row {
     display: flex; align-items: center; gap: var(--spacing-sm);
     min-width: 0;
+
+    .settings-wrapper { position: relative; flex-shrink: 0; margin-left: auto; }
   }
 
   .level-badge {

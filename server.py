@@ -1,4 +1,4 @@
-import os, math, uuid, random, hashlib, hmac, subprocess, sqlite3
+import os, math, uuid, random, hashlib, hmac, subprocess, sqlite3, logging
 from datetime import datetime, date
 from functools import wraps
 from contextlib import contextmanager
@@ -9,6 +9,12 @@ import bcrypt
 from flask_wtf.csrf import CSRFProtect
 
 load_dotenv()
+
+class IgnoreWellKnown(logging.Filter):
+    def filter(self, record):
+        return '/.well-known/' not in record.getMessage()
+
+logging.getLogger('werkzeug').addFilter(IgnoreWellKnown())
 
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
@@ -100,6 +106,10 @@ def get_version():
     return 'v0.0.0'
 
 # ============== Auth Routes ==============
+
+@app.route('/.well-known/<path:path>')
+def well_known(path):
+    return '', 204
 
 @app.route('/')
 def index():
