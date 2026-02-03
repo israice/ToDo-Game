@@ -13,7 +13,7 @@ git push origin master --force
 
 # UPDATE
 git add .
-git commit -m "v0.0.10 - исправлен дизайн логин страницы"
+git commit -m "v0.0.10 - test 1"
 git push
 
 # DEV LOG

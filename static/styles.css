@@ -110,21 +110,25 @@ body {
     .combo-count { font-size: 0.85rem; font-weight: 700; color: var(--accent-fire); }
   }
 
-  .stats-mini {
-    display: flex; gap: var(--spacing-xs); margin-left: auto;
+  .header-right {
+    display: flex; align-items: center; gap: var(--spacing-sm); margin-left: auto; flex-shrink: 0;
 
-    .stat-item {
-      display: flex; align-items: center; gap: 2px; padding: 4px 8px;
-      background: var(--bg-card); border-radius: 8px; font-weight: 600; font-size: 0.8rem;
+    .stats-mini {
+      display: flex; gap: var(--spacing-xs);
+
+      .stat-item {
+        display: flex; align-items: center; gap: 2px; padding: 4px 8px;
+        background: var(--bg-card); border-radius: 8px; font-weight: 600; font-size: 0.8rem;
+      }
+      .stat-icon { font-size: 0.85rem; }
     }
-    .stat-icon { font-size: 0.85rem; }
+
+    .settings-wrapper { position: relative; }
   }
 }
 
 /* ===== SETTINGS ===== */
 .settings-wrapper {
-  position: relative; flex-shrink: 0;
-
   .settings-btn {
     display: flex; align-items: center; justify-content: center;
     width: 44px; height: 44px; background: var(--bg-card);
