@@ -76,7 +76,7 @@ def with_db(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if 'user' not in session:
-            return jsonify({'error': 'Unauthorized'}), 401
+            return jsonify({'error': 'Не авторизован'}), 401
         with get_db() as conn:
             user = conn.execute('SELECT id FROM users WHERE username = ?', (session['user'],)).fetchone()
             return f(conn, user['id'], *args, **kwargs)
@@ -114,7 +114,7 @@ def login():
     if user and bcrypt.checkpw(request.form['password'].encode(), user['password'].encode()):
         session['user'] = user['username']
         return redirect('/')
-    return render_template('login.html', error='Invalid credentials')
+    return render_template('login.html', error='Неверные учётные данные')
 
 @app.route('/register', methods=['POST'])
 def register():
@@ -128,7 +128,7 @@ def register():
             session['user'] = request.form['username']
             return redirect('/')
         except:
-            session['register_error'] = 'User already exists'
+            session['register_error'] = 'Пользователь уже существует'
             return redirect('/')
 
 @app.route('/logout')
@@ -167,7 +167,7 @@ def api_update_settings(conn, user_id):
 def api_create_task(conn, user_id):
     data = request.get_json()
     if not data or not data.get('text', '').strip():
-        return jsonify({'error': 'Task text is required'}), 400
+        return jsonify({'error': 'Текст задачи обязателен'}), 400
     task_id = f"{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
     xp = random.randint(20, 35)
     conn.execute('INSERT INTO tasks (id, user_id, text, xp_reward) VALUES (?, ?, ?, ?)',
@@ -181,7 +181,7 @@ def api_create_task(conn, user_id):
 def api_update_task(conn, user_id, task_id):
     data = request.get_json()
     if not data or not data.get('text', '').strip():
-        return jsonify({'error': 'Task text is required'}), 400
+        return jsonify({'error': 'Текст задачи обязателен'}), 400
     conn.execute('UPDATE tasks SET text = ? WHERE id = ? AND user_id = ?', (data['text'].strip(), task_id, user_id))
     conn.commit()
     return jsonify({'success': True})
@@ -200,7 +200,7 @@ def api_delete_task(conn, user_id, task_id):
 def api_complete_task(conn, user_id, task_id):
     task = conn.execute('SELECT * FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
     if not task:
-        return jsonify({'error': 'Task not found'}), 404
+        return jsonify({'error': 'Задача не найдена'}), 404
 
     progress = get_or_create_progress(conn, user_id)
     client_combo = (request.get_json() or {}).get('combo', 0)

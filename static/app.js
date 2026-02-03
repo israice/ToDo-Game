@@ -30,18 +30,18 @@ function debounce(fn, delay) {
 
 // ========== ACHIEVEMENTS ==========
 const ACHIEVEMENTS = [
-  ['firstQuest', 'First Steps', 'Complete your first quest', '&#127941;'],
-  ['fiveQuests', 'Adventurer', 'Complete 5 quests', '&#9876;'],
-  ['tenQuests', 'Veteran', 'Complete 10 quests', '&#128737;'],
-  ['twentyFiveQuests', 'Hero', 'Complete 25 quests', '&#129409;'],
-  ['fiftyQuests', 'Legend', 'Complete 50 quests', '&#128081;'],
-  ['combo3', 'Combo Starter', 'Reach 3x combo', '&#128293;'],
-  ['combo5', 'On Fire!', 'Reach 5x combo', '&#9889;'],
-  ['combo10', 'Unstoppable', 'Reach 10x combo', '&#127775;'],
-  ['level5', 'Rising Star', 'Reach level 5', '&#11088;'],
-  ['level10', 'Master', 'Reach level 10', '&#128142;'],
-  ['streak7', 'Week Warrior', 'Maintain a 7-day streak', '&#128170;'],
-  ['streak30', 'Month Master', 'Maintain a 30-day streak', '&#127942;'],
+  ['firstQuest', 'Первые шаги', 'Выполни свой первый квест', '&#127941;'],
+  ['fiveQuests', 'Путешественник', 'Выполни 5 квестов', '&#9876;'],
+  ['tenQuests', 'Ветеран', 'Выполни 10 квестов', '&#128737;'],
+  ['twentyFiveQuests', 'Герой', 'Выполни 25 квестов', '&#129409;'],
+  ['fiftyQuests', 'Легенда', 'Выполни 50 квестов', '&#128081;'],
+  ['combo3', 'Начало комбо', 'Достигни комбо x3', '&#128293;'],
+  ['combo5', 'В огне!', 'Достигни комбо x5', '&#9889;'],
+  ['combo10', 'Неудержимый', 'Достигни комбо x10', '&#127775;'],
+  ['level5', 'Восходящая звезда', 'Достигни 5 уровня', '&#11088;'],
+  ['level10', 'Мастер', 'Достигни 10 уровня', '&#128142;'],
+  ['streak7', 'Воин недели', 'Поддерживай серию 7 дней', '&#128170;'],
+  ['streak30', 'Мастер месяца', 'Поддерживай серию 30 дней', '&#127942;'],
 ].map(([id, name, desc, icon]) => ({ id, name, desc, icon }));
 
 // ========== API HELPERS ==========
@@ -132,10 +132,10 @@ function renderTasks() {
     li.className = 'task-item';
     li.dataset.id = task.id;
     li.innerHTML = `
-      <label class="task-checkbox"><input type="checkbox" aria-label="Complete quest"><span class="checkbox-custom"></span></label>
+      <label class="task-checkbox"><input type="checkbox" aria-label="Выполнить квест"><span class="checkbox-custom"></span></label>
       <span class="task-text">${esc(task.text)}</span>
       <span class="task-xp">+${task.xp} XP</span>
-      <button class="task-delete" aria-label="Delete quest">&#128465;</button>`;
+      <button class="task-delete" aria-label="Удалить квест">&#128465;</button>`;
 
     li.querySelector('input').onchange = () => completeTask(task.id, li);
     li.querySelector('.task-delete').onclick = () => deleteTask(task.id, li);
@@ -290,7 +290,7 @@ async function toggleSetting(key, transform = v => !v) {
   if (state.sound) playSound('add');
 }
 $('sound-toggle').onclick = () => toggleSetting('sound');
-$('version-btn').onclick = () => alert('Coming soon!');
+$('version-btn').onclick = () => alert('Скоро будет!');
 
 document.addEventListener('click', initAudio, { once: true });
 document.addEventListener('keydown', initAudio, { once: true });
