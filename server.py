@@ -35,6 +35,21 @@ def verify_signature(payload, signature):
     ).hexdigest()
     return hmac.compare_digest(expected, signature)
 
+
+def get_version():
+    """Read version from VERSION.md (last line starting with 'v')"""
+    try:
+        with open('VERSION.md', 'r', encoding='utf-8') as f:
+            for line in reversed(f.readlines()):
+                line = line.strip()
+                if line.startswith('v'):
+                    # Extract version number (e.g., v0.0.4 from "v0.0.4 - description")
+                    return line.split()[0] if ' ' in line else line
+    except FileNotFoundError:
+        pass
+    return 'v0.0.0'
+
+
 # Achievement definitions (same as in app.js)
 ACHIEVEMENTS = [
     {'id': 'firstQuest', 'check': lambda s: s['completed'] >= 1},
@@ -137,7 +152,7 @@ def require_auth(f):
 @app.route('/')
 def index():
     if 'user' in session:
-        return render_template('dashboard.html', user=session['user'])
+        return render_template('dashboard.html', user=session['user'], version=get_version())
     return render_template('login.html')
 
 @app.route('/login', methods=['POST'])
