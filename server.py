@@ -39,13 +39,13 @@ def verify_signature(payload, signature):
 def get_version():
     """Read version from VERSION.md (last line starting with 'v')"""
     try:
-        with open('VERSION.md', 'r', encoding='utf-8') as f:
+        version_file = os.path.join(os.path.dirname(__file__), 'VERSION.md')
+        with open(version_file, 'r', encoding='utf-8') as f:
             for line in reversed(f.readlines()):
                 line = line.strip()
                 if line.startswith('v'):
-                    # Extract version number (e.g., v0.0.4 from "v0.0.4 - description")
                     return line.split()[0] if ' ' in line else line
-    except FileNotFoundError:
+    except Exception:
         pass
     return 'v0.0.0'
 
