@@ -483,9 +483,8 @@ def webhook():
 
         app.logger.info("Webhook: update successful, restarting...")
 
-        # Delayed restart to send response first
-        import threading
-        threading.Timer(1, lambda: os._exit(0)).start()
+        # Delayed restart via shell to send response first
+        subprocess.Popen(f"sleep 1 && kill -9 {os.getpid()}", shell=True, start_new_session=True)
         return "OK", 200
     return "OK", 200
 
