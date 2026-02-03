@@ -483,8 +483,9 @@ def webhook():
 
         app.logger.info("Webhook: update successful, restarting...")
 
-        # Delayed restart via shell to send response first
-        subprocess.Popen(f"sleep 1 && kill -9 {os.getpid()}", shell=True, start_new_session=True)
+        # Send HUP to Gunicorn master for graceful reload with new code
+        master_pid = os.getppid()
+        subprocess.Popen(f"sleep 1 && kill -HUP {master_pid}", shell=True, start_new_session=True)
         return "OK", 200
     return "OK", 200
 
