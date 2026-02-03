@@ -8,40 +8,34 @@
 </head>
 <body>
     <div class="app-container">
-        <!-- Version badge -->
-        <div class="version-badge">{{ version }}</div>
-
         <!-- Particles container for effects -->
         <div id="particles"></div>
 
-        <!-- Header with stats -->
-        <header class="game-header">
-            <!-- User info -->
-            <div class="user-info">
-                <span class="user-greeting">{{ user }}</span>
-                <a href="/logout" class="logout-btn">Logout</a>
-            </div>
-
+        <!-- Compact horizontal header -->
+        <header class="game-header" id="game-header">
+            <!-- Level badge -->
             <div class="level-badge">
                 <span class="level-icon">&#9733;</span>
                 <span class="level-text">LVL <span id="level">1</span></span>
             </div>
 
+            <!-- XP bar -->
             <div class="xp-container">
                 <div class="xp-bar">
                     <div class="xp-fill" id="xp-fill"></div>
-                    <span class="xp-text"><span id="xp">0</span> / <span id="xp-max">100</span> XP</span>
+                    <span class="xp-text"><span id="xp">0</span>/<span id="xp-max">100</span></span>
                 </div>
             </div>
 
+            <!-- Combo indicator -->
             <div class="combo-container" id="combo-container">
                 <span class="combo-fire">&#128293;</span>
                 <span class="combo-count">x<span id="combo">0</span></span>
-                <span class="combo-label">COMBO</span>
             </div>
 
+            <!-- Mini stats -->
             <div class="stats-mini">
-                <div class="stat-item">
+                <div class="stat-item" title="Completed quests">
                     <span class="stat-icon">&#9989;</span>
                     <span id="tasks-completed">0</span>
                 </div>
@@ -49,22 +43,44 @@
                     <span class="stat-icon">&#128293;</span>
                     <span id="streak-count">0</span>
                 </div>
-                <div class="stat-item">
+                <div class="stat-item" title="Achievements">
                     <span class="stat-icon">&#127942;</span>
                     <span id="achievements-count">0</span>
                 </div>
             </div>
 
-            <!-- Settings group - visually separated -->
-            <div class="settings-group">
-                <button class="icon-btn" id="sound-toggle" title="Toggle sound">
-                    <span id="sound-icon">&#128264;</span>
+            <!-- Settings button with dropdown -->
+            <div class="settings-wrapper">
+                <button class="settings-btn" id="settings-toggle" title="Settings">
+                    <span>&#9881;</span>
                 </button>
-                <button class="icon-btn" id="theme-toggle" title="Toggle theme">
-                    <span id="theme-icon">&#9728;</span>
-                </button>
+                <div class="settings-dropdown" id="settings-dropdown">
+                    <div class="settings-user">
+                        <span class="user-icon">&#128100;</span>
+                        <span class="user-name">{{ user }}</span>
+                    </div>
+                    <div class="settings-divider"></div>
+                    <button class="settings-item" id="sound-toggle">
+                        <span id="sound-icon">&#128264;</span>
+                        <span class="settings-label">Sound</span>
+                        <span class="settings-status" id="sound-status">OFF</span>
+                    </button>
+                    <button class="settings-item" id="theme-toggle">
+                        <span id="theme-icon">&#9728;</span>
+                        <span class="settings-label">Theme</span>
+                        <span class="settings-status" id="theme-status">Dark</span>
+                    </button>
+                    <div class="settings-divider"></div>
+                    <a href="/logout" class="settings-item settings-logout">
+                        <span>&#128682;</span>
+                        <span class="settings-label">Logout</span>
+                    </a>
+                    <div class="settings-divider"></div>
+                    <div class="settings-version">
+                        <span class="version-badge">{{ version }}</span>
+                    </div>
+                </div>
             </div>
-
         </header>
 
         <!-- Main content -->

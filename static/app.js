@@ -109,13 +109,14 @@ function updateUI() {
     $('combo-container').classList.remove('active');
   }
 
-  // Sound icon
+  // Sound icon and status
   $('sound-icon').innerHTML = state.sound ? '&#128266;' : '&#128263;';
-  $('sound-toggle').classList.toggle('muted', !state.sound);
+  if ($('sound-status')) $('sound-status').textContent = state.sound ? 'ON' : 'OFF';
 
   // Theme
   document.documentElement.setAttribute('data-theme', state.theme);
   $('theme-icon').innerHTML = state.theme === 'light' ? '&#9790;' : '&#9728;';
+  if ($('theme-status')) $('theme-status').textContent = state.theme === 'light' ? 'Light' : 'Dark';
 }
 
 // ========== RENDER TASKS ==========
@@ -311,6 +312,29 @@ $('theme-toggle').onclick = async () => {
 
 document.addEventListener('click', initAudio, { once: true });
 document.addEventListener('keydown', initAudio, { once: true });
+
+// ========== SETTINGS DROPDOWN ==========
+const settingsToggle = $('settings-toggle');
+const settingsDropdown = $('settings-dropdown');
+
+settingsToggle.addEventListener('click', (e) => {
+  e.stopPropagation();
+  settingsDropdown.classList.toggle('show');
+});
+
+// Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+  if (!settingsDropdown.contains(e.target) && !settingsToggle.contains(e.target)) {
+    settingsDropdown.classList.remove('show');
+  }
+});
+
+// Close dropdown on escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    settingsDropdown.classList.remove('show');
+  }
+});
 
 // ========== INIT ==========
 // Inject particle animation

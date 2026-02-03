@@ -13,7 +13,7 @@ git push origin master --force
 
 # UPDATE
 git add .
-git commit -m "v0.0.6 - testing version change test 2"
+git commit -m "v0.0.7 - смена дизайна на мобильный"
 git push
 
 # DEV LOG
@@ -23,3 +23,4 @@ v0.0.3 - подключен webhook production auto update
 v0.0.4 - auto version update in page
 v0.0.5 - testing version change
 v0.0.6 - testing version change test 2
+v0.0.7 - смена дизайна на мобильный
