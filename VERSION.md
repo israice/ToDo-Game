@@ -10,7 +10,7 @@ git push origin master --force
 
 # UPDATE
 git add .
-git commit -m "v0.0.2 - обновлены задания и их поочередность"
+git commit -m "v0.0.2 - test 1"
 git push
 
 # DEV LOG
