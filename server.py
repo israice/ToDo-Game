@@ -482,7 +482,11 @@ def webhook():
             return "Git reset failed", 500
 
         app.logger.info("Webhook: update successful, restarting...")
-        os._exit(0)  # Exit to restart container with new code
+
+        # Delayed restart to send response first
+        import threading
+        threading.Timer(1, lambda: os._exit(0)).start()
+        return "OK", 200
     return "OK", 200
 
 
