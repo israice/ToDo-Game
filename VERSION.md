@@ -1,5 +1,8 @@
 
 # RECOVERY
+docker compose up -d --build
+
+
 git log --oneline -n 20
 
 Copy-Item .env $env:TEMP\.env.backup
@@ -10,7 +13,7 @@ git push origin master --force
 
 # UPDATE
 git add .
-git commit -m "v0.0.3 - подключен webhook production auto update"
+git commit -m "v0.0.3 - test 1"
 git push
 
 # DEV LOG
