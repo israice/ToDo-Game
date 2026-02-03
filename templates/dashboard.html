@@ -15,27 +15,19 @@
 
         <!-- Compact horizontal header -->
         <header class="game-header" id="game-header">
-            <!-- Level badge -->
-            <div class="level-badge">
-                <span class="level-icon">&#9733;</span>
-                <span class="level-text">LVL <span id="level">1</span></span>
-            </div>
-
-            <!-- XP bar -->
-            <div class="xp-container">
-                <div class="xp-bar">
-                    <div class="xp-fill" id="xp-fill"></div>
-                    <span class="xp-text"><span id="xp">0</span>/<span id="xp-max">100</span></span>
+            <div class="level-row">
+                <div class="level-badge">
+                    <span class="level-icon">&#9733;</span>
+                    <span class="level-text">LVL <span id="level">1</span></span>
+                </div>
+                <div class="xp-container">
+                    <div class="xp-bar">
+                        <div class="xp-fill" id="xp-fill"></div>
+                        <span class="xp-text"><span id="xp">0</span>/<span id="xp-max">100</span></span>
+                    </div>
                 </div>
             </div>
 
-            <!-- Combo indicator -->
-            <div class="combo-container" id="combo-container">
-                <span class="combo-fire">&#128293;</span>
-                <span class="combo-count">x<span id="combo">0</span></span>
-            </div>
-
-            <!-- Header right group -->
             <div class="header-right">
                 <div class="stats-mini">
                     <div class="stat-item" aria-label="Completed quests">
@@ -52,36 +44,43 @@
                     </div>
                 </div>
 
+                <!-- Combo indicator -->
+                <div class="combo-container" id="combo-container">
+                    <span class="combo-fire">&#128293;</span>
+                    <span class="combo-count">x<span id="combo">0</span></span>
+                </div>
+
                 <!-- Settings button with dropdown -->
                 <div class="settings-wrapper">
-                <button class="settings-btn" id="settings-toggle" aria-label="Settings">
-                    <span aria-hidden="true">&#9881;</span>
-                </button>
-                <div class="settings-dropdown" id="settings-dropdown">
-                    <div class="settings-user">
-                        <span class="user-icon">&#128100;</span>
-                        <span class="user-name">{{ user }}</span>
+                    <button class="settings-btn" id="settings-toggle" aria-label="Settings">
+                        <span aria-hidden="true">&#9881;</span>
+                    </button>
+                    <div class="settings-dropdown" id="settings-dropdown">
+                        <div class="settings-user">
+                            <span class="user-icon">&#128100;</span>
+                            <span class="user-name">{{ user }}</span>
+                        </div>
+                        <div class="settings-divider"></div>
+                        <button class="settings-item" id="sound-toggle">
+                            <span id="sound-icon">&#128264;</span>
+                            <span class="settings-label">Sound</span>
+                            <span class="settings-status" id="sound-status">OFF</span>
+                        </button>
+                        <div class="settings-divider"></div>
+                        <button class="settings-item" id="version-btn">
+                            <span>&#128736;</span>
+                            <span class="settings-label">Version</span>
+                            <span class="settings-status">{{ version }}</span>
+                        </button>
+                        <div class="settings-divider"></div>
+                        <a href="/logout" class="settings-item settings-logout">
+                            <span>&#128682;</span>
+                            <span class="settings-label">Logout</span>
+                        </a>
                     </div>
-                    <div class="settings-divider"></div>
-                    <button class="settings-item" id="sound-toggle">
-                        <span id="sound-icon">&#128264;</span>
-                        <span class="settings-label">Sound</span>
-                        <span class="settings-status" id="sound-status">OFF</span>
-                    </button>
-                    <div class="settings-divider"></div>
-                    <button class="settings-item" id="version-btn">
-                        <span>&#128736;</span>
-                        <span class="settings-label">Version</span>
-                        <span class="settings-status">{{ version }}</span>
-                    </button>
-                    <div class="settings-divider"></div>
-                    <a href="/logout" class="settings-item settings-logout">
-                        <span>&#128682;</span>
-                        <span class="settings-label">Logout</span>
-                    </a>
-                </div>
                 </div>
             </div>
+
         </header>
 
         <!-- Main content -->
@@ -98,7 +97,7 @@
                     >
                     <button type="submit" class="add-btn" id="add-btn">
                         <span class="btn-icon">+</span>
-                        <span class="btn-text">Add Quest</span>
+                        <span class="btn-text">Add</span>
                     </button>
                 </div>
             </form>

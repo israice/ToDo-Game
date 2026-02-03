@@ -63,31 +63,63 @@ body {
 /* ===== HEADER ===== */
 .game-header {
   position: sticky; top: 0; z-index: 50;
-  display: flex; flex-wrap: nowrap; align-items: center; gap: var(--spacing-sm);
-  overflow: hidden;
+  display: flex; flex-direction: column; gap: 4px;
   padding: var(--spacing-sm) var(--spacing-md);
   background: var(--bg-secondary); border-radius: 12px; margin-bottom: var(--spacing-md);
   border: 1px solid var(--border-color); box-shadow: 0 4px 20px rgba(0,0,0,0.3);
 
-  .level-badge {
-    display: flex; align-items: center; gap: var(--spacing-xs);
-    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
-    padding: 6px 12px; border-radius: 20px; font-weight: 700; font-size: 0.85rem;
-    white-space: nowrap; flex-shrink: 1; min-width: 0;
+  .header-right {
+    display: flex; align-items: center; gap: var(--spacing-sm);
+    min-width: 0; flex-wrap: nowrap;
 
-    .level-icon { font-size: 1rem; animation: spin 3s linear infinite; }
+    .stats-mini {
+      display: flex; gap: var(--spacing-xs); min-width: 0; flex-shrink: 0;
+
+      .stat-item {
+        display: flex; align-items: center; gap: 2px; padding: 4px 8px;
+        background: var(--bg-card); border-radius: 8px; font-weight: 600; font-size: 0.8rem;
+        white-space: nowrap;
+      }
+      .stat-icon { font-size: 0.85rem; }
+    }
+
+    .combo-container {
+      display: none; align-items: center; justify-content: center; gap: 4px; padding: 4px 8px;
+      background: var(--bg-card); border-radius: 8px; border: 1px solid var(--accent-fire);
+      flex: 1; min-width: 0;
+
+      &.active { display: flex; animation: pulse 0.5s ease; }
+      .combo-fire { font-size: 0.85rem; animation: flicker 0.3s ease-in-out infinite alternate; }
+      .combo-count { font-size: 0.8rem; font-weight: 700; color: var(--accent-fire); }
+    }
+
+    .settings-wrapper { position: relative; flex-shrink: 0; margin-left: auto; }
   }
 
-  .xp-container { flex: 1 1 0; min-width: 50px; max-width: 200px; }
+  .level-row {
+    display: flex; align-items: center; gap: var(--spacing-sm);
+    min-width: 0;
+  }
+
+  .level-badge {
+    display: flex; align-items: center; gap: 4px;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    padding: 3px 10px; border-radius: 12px; font-weight: 700; font-size: 0.75rem;
+    white-space: nowrap; flex-shrink: 0;
+
+    .level-icon { font-size: 0.8rem; animation: spin 3s linear infinite; }
+  }
+
+  .xp-container { flex: 1; min-width: 0; }
 
   .xp-bar {
-    position: relative; height: 20px; background: var(--bg-card);
-    border-radius: 10px; overflow: hidden; border: 1px solid var(--border-color);
+    position: relative; height: 16px; background: var(--bg-card);
+    border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color);
 
     .xp-fill {
       height: 100%; width: 0%;
       background: linear-gradient(90deg, var(--accent-primary), var(--accent-success));
-      border-radius: 9px; transition: width var(--transition-slow); position: relative;
+      border-radius: 7px; transition: width var(--transition-slow); position: relative;
 
       &::after {
         content: ''; position: absolute; inset: 0;
@@ -98,34 +130,8 @@ body {
 
     .xp-text {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      font-size: 0.7rem; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,0.5); white-space: nowrap;
+      font-size: 0.65rem; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,0.5); white-space: nowrap;
     }
-  }
-
-  .combo-container {
-    display: none; align-items: center; gap: 2px; padding: 4px 8px;
-    background: var(--bg-card); border-radius: 12px; border: 1px solid var(--accent-fire); flex-shrink: 1; min-width: 0;
-
-    &.active { display: flex; animation: pulse 0.5s ease; }
-    .combo-fire { font-size: 0.9rem; animation: flicker 0.3s ease-in-out infinite alternate; }
-    .combo-count { font-size: 0.85rem; font-weight: 700; color: var(--accent-fire); }
-  }
-
-  .header-right {
-    display: flex; align-items: center; gap: var(--spacing-sm); margin-left: auto; flex-shrink: 1; min-width: 0;
-
-    .stats-mini {
-      display: flex; gap: var(--spacing-xs); flex-shrink: 1; min-width: 0; overflow: hidden;
-
-      .stat-item {
-        display: flex; align-items: center; gap: 2px; padding: 4px 8px;
-        background: var(--bg-card); border-radius: 8px; font-weight: 600; font-size: 0.8rem;
-        flex-shrink: 1; min-width: 0; white-space: nowrap;
-      }
-      .stat-icon { font-size: 0.85rem; }
-    }
-
-    .settings-wrapper { position: relative; }
   }
 }
 
@@ -133,10 +139,10 @@ body {
 .settings-wrapper {
   .settings-btn {
     display: flex; align-items: center; justify-content: center;
-    width: 44px; height: 44px; background: var(--bg-card);
-    border: 1px solid var(--border-color); border-radius: 10px;
+    padding: 4px 8px; background: var(--bg-card);
+    border: 1px solid var(--border-color); border-radius: 8px;
     cursor: pointer; transition: all var(--transition-fast);
-    font-size: 1.2rem; color: var(--text-secondary);
+    font-size: 0.85rem; color: var(--text-secondary);
 
     &:hover { background: var(--accent-primary); color: var(--text-primary); border-color: var(--accent-primary); }
   }
@@ -180,30 +186,32 @@ body {
 .add-task-form { margin-bottom: var(--spacing-lg); }
 
 .input-wrapper {
-  display: flex; flex-direction: column; gap: var(--spacing-sm);
-  padding: var(--spacing-sm); background: var(--bg-secondary);
-  border-radius: 12px; border: 2px solid var(--border-color); transition: all var(--transition-normal);
+  display: flex; flex-direction: row; align-items: center; gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-xs) var(--spacing-xs) var(--spacing-md);
+  background: var(--bg-secondary);
+  border-radius: 10px; border: 2px solid var(--border-color); transition: all var(--transition-normal);
 
   &:focus-within { border-color: var(--accent-primary); box-shadow: 0 0 20px var(--shadow-color); }
 
   #task-input {
-    flex: 1; padding: var(--spacing-md) var(--spacing-lg);
+    flex: 1; padding: var(--spacing-sm) 0;
     background: transparent; border: none; outline: none;
-    font-size: 1rem; color: var(--text-primary);
+    font-size: 0.95rem; color: var(--text-primary);
 
     &::placeholder { color: var(--text-muted); }
   }
 
   .add-btn {
-    display: flex; align-items: center; justify-content: center; gap: var(--spacing-sm);
-    padding: var(--spacing-md) var(--spacing-lg);
+    display: flex; align-items: center; justify-content: center; gap: var(--spacing-xs);
+    padding: var(--spacing-sm) var(--spacing-md);
     background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
-    border: none; border-radius: 10px; color: white;
-    font-size: 1rem; font-weight: 600; cursor: pointer;
-    transition: all var(--transition-normal); min-height: 48px;
+    border: none; border-radius: 8px; color: white;
+    font-size: 0.9rem; font-weight: 600; cursor: pointer;
+    transition: all var(--transition-normal); min-height: 36px;
 
-    &:hover { transform: translateY(-2px); box-shadow: 0 8px 25px var(--shadow-color); }
-    .btn-icon { font-size: 1.3rem; font-weight: 300; }
+    &:hover { transform: translateY(-1px); box-shadow: 0 4px 15px var(--shadow-color); }
+    .btn-icon { font-size: 1.1rem; font-weight: 300; }
+    .btn-text { display: none; }
   }
 }
 
@@ -409,18 +417,8 @@ body {
     padding: var(--spacing-xl);
   }
 
-  .input-wrapper {
-    flex-direction: row;
-    align-items: stretch;
-  }
-
-  #task-input {
-    flex: 1;
-  }
-
-  .add-btn {
-    width: auto;
-    flex-shrink: 0;
+  .input-wrapper .add-btn .btn-text {
+    display: inline;
   }
 }
 
