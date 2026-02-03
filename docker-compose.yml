@@ -1,0 +1,17 @@
+services:
+  web:
+    container_name: todo-game
+    restart: unless-stopped
+    build: .
+    ports:
+      - "${PORT}:5000"
+    volumes:
+      - app_data:/app
+    environment:
+      - REPO_URL=${REPO_URL}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - BRANCH=${BRANCH}
+    entrypoint: ["/bin/sh", "-c", "if [ -z \"$REPO_URL\" ]; then echo 'ERROR: REPO_URL is not set. Create .env file with REPO_URL=https://github.com/username/repo.git' && exit 1; fi; BRANCH=${BRANCH:-master}; if [ -d /app/.git ]; then cd /app && git fetch origin && git reset --hard origin/$BRANCH; else rm -rf /app/* /app/.[!.]* 2>/dev/null; git clone --branch $BRANCH --single-branch $REPO_URL /app; fi && cd /app && pip install --no-cache-dir -r requirements.txt 2>/dev/null; gunicorn --bind 0.0.0.0:5000 server:app"]
+
+volumes:
+  app_data:

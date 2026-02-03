@@ -2,6 +2,9 @@ import os
 import math
 import uuid
 import random
+import hashlib
+import hmac
+import subprocess
 from datetime import datetime, date
 from flask import Flask, request, redirect, session, render_template, jsonify
 from dotenv import load_dotenv
@@ -17,6 +20,18 @@ if not app.secret_key:
     raise RuntimeError("SECRET_KEY environment variable is required")
 
 csrf = CSRFProtect(app)
+
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
+BRANCH = os.environ.get("BRANCH", "master")
+
+
+def verify_signature(payload, signature):
+    if not WEBHOOK_SECRET:
+        return False
+    expected = "sha256=" + hmac.new(
+        WEBHOOK_SECRET.encode(), payload, hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature)
 
 # Achievement definitions (same as in app.js)
 ACHIEVEMENTS = [
@@ -405,6 +420,49 @@ def api_reset_combo():
     conn.commit()
     conn.close()
     return jsonify({'success': True})
+
+
+@app.route("/webhook", methods=["POST"])
+@csrf.exempt
+def webhook():
+    signature = request.headers.get("X-Hub-Signature-256", "")
+    if not verify_signature(request.data, signature):
+        app.logger.warning("Webhook: invalid signature")
+        return "Forbidden", 403
+
+    if request.headers.get("X-GitHub-Event") == "push":
+        payload = request.get_json(silent=True) or {}
+        ref = payload.get("ref")
+        if ref != f"refs/heads/{BRANCH}":
+            app.logger.info(f"Webhook: ignored push to {ref}")
+            return "Ignored", 200
+
+        app.logger.info(f"Webhook: updating from {BRANCH}")
+
+        fetch_result = subprocess.run(
+            ["git", "fetch", "origin"],
+            cwd="/app",
+            capture_output=True,
+            text=True
+        )
+        if fetch_result.returncode != 0:
+            app.logger.error(f"Git fetch failed: {fetch_result.stderr}")
+            return "Git fetch failed", 500
+
+        reset_result = subprocess.run(
+            ["git", "reset", "--hard", f"origin/{BRANCH}"],
+            cwd="/app",
+            capture_output=True,
+            text=True
+        )
+        if reset_result.returncode != 0:
+            app.logger.error(f"Git reset failed: {reset_result.stderr}")
+            return "Git reset failed", 500
+
+        app.logger.info("Webhook: update successful, restarting...")
+        os._exit(0)  # Exit to restart container with new code
+    return "OK", 200
+
 
 if __name__ == '__main__':
     init_db()
