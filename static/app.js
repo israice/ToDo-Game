@@ -290,6 +290,7 @@ async function toggleSetting(key, transform = v => !v) {
   if (state.sound) playSound('add');
 }
 $('sound-toggle').onclick = () => toggleSetting('sound');
+$('version-btn').onclick = () => alert('Coming soon!');
 
 document.addEventListener('click', initAudio, { once: true });
 document.addEventListener('keydown', initAudio, { once: true });

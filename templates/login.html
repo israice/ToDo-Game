@@ -1,44 +1,284 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="utf-8">
-    <title>Login</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>ToDo Game - Login</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>">
     <style>
-        * { box-sizing: border-box; }
-        body { font-family: Arial; max-width: 360px; margin: 80px auto; padding: 0 20px; }
-        .tabs { display: flex; }
-        .tab { flex: 1; padding: 12px; text-align: center; cursor: pointer; background: #e9e9e9; border: none; }
-        .tab.active { background: #007bff; color: white; }
-        .form { display: none; padding: 20px; background: #f5f5f5; }
-        .form.active { display: block; }
-        input { width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid #ddd; }
-        button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; cursor: pointer; }
-        .error { color: #d33; margin-bottom: 12px; text-align: center; }
+        :root {
+            --bg-primary: #0f0f1a;
+            --bg-secondary: #1a1a2e;
+            --bg-card: #252542;
+            --accent-primary: #6c5ce7;
+            --accent-secondary: #a29bfe;
+            --accent-fire: #ff6b6b;
+            --text-primary: #ffffff;
+            --text-secondary: #b2b2d8;
+            --text-muted: #8585a8;
+            --border-color: #3d3d5c;
+            --shadow-color: rgba(108, 92, 231, 0.3);
+            --transition-fast: 0.2s ease;
+            --transition-normal: 0.3s ease;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px;
+        }
+
+        .login-container {
+            width: 100%;
+            max-width: 340px;
+            animation: slide-in 0.5s ease;
+        }
+
+        @keyframes slide-in {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .logo {
+            text-align: center;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .logo-icon {
+            font-size: 2rem;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .logo-title {
+            font-size: 1.4rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .card {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .tabs {
+            display: flex;
+            background: var(--bg-card);
+        }
+
+        .tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            cursor: pointer;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all var(--transition-normal);
+            position: relative;
+        }
+
+        .tab:hover {
+            color: var(--text-secondary);
+        }
+
+        .tab.active {
+            color: var(--text-primary);
+            background: var(--bg-secondary);
+        }
+
+        .tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 30px;
+            height: 2px;
+            background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+            border-radius: 2px 2px 0 0;
+        }
+
+        .form {
+            display: none;
+            padding: 14px 16px 16px;
+        }
+
+        .form.active {
+            display: block;
+            animation: fade-in 0.3s ease;
+        }
+
+        @keyframes fade-in {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .input-group {
+            margin-bottom: 10px;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            font-weight: 500;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 10px 12px;
+            background: var(--bg-card);
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 0.9rem;
+            transition: all var(--transition-normal);
+            outline: none;
+        }
+
+        .input-group input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .input-group input:focus {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 15px var(--shadow-color);
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 11px;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all var(--transition-normal);
+            margin-top: 4px;
+        }
+
+        .submit-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px var(--shadow-color);
+        }
+
+        .submit-btn:active {
+            transform: translateY(0);
+        }
+
+        .error {
+            background: rgba(255, 107, 107, 0.15);
+            border: 1px solid var(--accent-fire);
+            color: var(--accent-fire);
+            padding: 8px 12px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            text-align: center;
+            font-size: 0.8rem;
+            animation: shake 0.5s ease;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-5px); }
+            40%, 80% { transform: translateX(5px); }
+        }
+
+        :focus-visible {
+            outline: 2px solid var(--accent-primary);
+            outline-offset: 2px;
+        }
+
+        :focus:not(:focus-visible) {
+            outline: none;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
     </style>
 </head>
 <body>
-    <div class="tabs">
-        <div class="tab active" onclick="show('login')">Login</div>
-        <div class="tab" onclick="show('register')">Register</div>
-    </div>
+    <div class="login-container">
+        <div class="logo">
+            <span class="logo-icon">🎯</span>
+            <div class="logo-title">ToDo Game</div>
+        </div>
 
-    <div id="login" class="form active">
-        {% if error or register_error %}<div class="error">{{ error or register_error }}</div>{% endif %}
-        <form method="post" action="/login">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input name="username" placeholder="Username" required>
-            <input name="password" type="password" placeholder="Password" required>
-            <button>Sign In</button>
-        </form>
-    </div>
+        <div class="card">
+            <div class="tabs">
+                <button class="tab active" onclick="show('login')" type="button">Sign In</button>
+                <button class="tab" onclick="show('register')" type="button">Sign Up</button>
+            </div>
 
-    <div id="register" class="form">
-        <form method="post" action="/register">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input name="username" placeholder="Username" required>
-            <input name="password" type="password" placeholder="Password" required>
-            <button>Sign Up</button>
-        </form>
+            <div id="login" class="form active">
+                {% if error %}<div class="error">{{ error }}</div>{% endif %}
+                {% if register_error == "User already exists" %}<div class="error">{{ register_error }}</div>{% endif %}
+                <form method="post" action="/login">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="input-group">
+                        <label for="login-username">Username</label>
+                        <input id="login-username" name="username" type="text" placeholder="Enter username" required autocomplete="username" autofocus>
+                    </div>
+                    <div class="input-group">
+                        <label for="login-password">Password</label>
+                        <input id="login-password" name="password" type="password" placeholder="Enter password" required autocomplete="current-password">
+                    </div>
+                    <button type="submit" class="submit-btn">Start Quest</button>
+                </form>
+            </div>
+
+            <div id="register" class="form">
+                {% if register_error and register_error != "User already exists" %}<div class="error">{{ register_error }}</div>{% endif %}
+                <form method="post" action="/register">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="input-group">
+                        <label for="register-username">Username</label>
+                        <input id="register-username" name="username" type="text" placeholder="Choose username" required autocomplete="username">
+                    </div>
+                    <div class="input-group">
+                        <label for="register-password">Password</label>
+                        <input id="register-password" name="password" type="password" placeholder="Create password" required autocomplete="new-password">
+                    </div>
+                    <button type="submit" class="submit-btn">Create Account</button>
+                </form>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -46,7 +286,9 @@
             document.querySelectorAll('.form, .tab').forEach(e => e.classList.remove('active'));
             document.getElementById(id).classList.add('active');
             document.querySelector(`.tab:nth-child(${id === 'login' ? 1 : 2})`).classList.add('active');
+            document.getElementById(id).querySelector('input[type="text"]').focus();
         }
+        {% if register_error and register_error != "User already exists" %}show('register');{% endif %}
     </script>
 </body>
 </html>

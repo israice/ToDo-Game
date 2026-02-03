@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quest Todo - Gamified Task Manager</title>
+    <title>ToDo Game - Gamified Task Manager</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
@@ -67,14 +68,16 @@
                         <span class="settings-status" id="sound-status">OFF</span>
                     </button>
                     <div class="settings-divider"></div>
+                    <button class="settings-item" id="version-btn">
+                        <span>&#128736;</span>
+                        <span class="settings-label">Version</span>
+                        <span class="settings-status">{{ version }}</span>
+                    </button>
+                    <div class="settings-divider"></div>
                     <a href="/logout" class="settings-item settings-logout">
                         <span>&#128682;</span>
                         <span class="settings-label">Logout</span>
                     </a>
-                    <div class="settings-divider"></div>
-                    <div class="settings-version">
-                        <span class="version-badge">{{ version }}</span>
-                    </div>
                 </div>
             </div>
         </header>
