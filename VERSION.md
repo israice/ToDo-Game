@@ -13,7 +13,7 @@ git push origin master --force
 
 # UPDATE
 git add .
-git commit -m "v0.0.8 - deploy fix"
+git commit -m "v0.0.9 - пересобраны файлы заного для уменьшения размеров"
 git push
 
 # DEV LOG
@@ -25,3 +25,4 @@ v0.0.5 - testing version change
 v0.0.6 - testing version change test 2
 v0.0.7 - смена дизайна на мобильный
 v0.0.8 - deploy fix
+v0.0.9 - пересобраны файлы заного для уменьшения размеров

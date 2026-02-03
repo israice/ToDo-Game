@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
+    <a href="#tasks-list" class="skip-to-content">Перейти к задачам</a>
     <div class="app-container">
         <!-- Particles container for effects -->
         <div id="particles"></div>
@@ -35,24 +36,24 @@
 
             <!-- Mini stats -->
             <div class="stats-mini">
-                <div class="stat-item" title="Completed quests">
-                    <span class="stat-icon">&#9989;</span>
+                <div class="stat-item" aria-label="Completed quests">
+                    <span class="stat-icon" aria-hidden="true">&#9989;</span>
                     <span id="tasks-completed">0</span>
                 </div>
-                <div class="stat-item" title="Daily streak">
-                    <span class="stat-icon">&#128293;</span>
+                <div class="stat-item" aria-label="Daily streak">
+                    <span class="stat-icon" aria-hidden="true">&#128293;</span>
                     <span id="streak-count">0</span>
                 </div>
-                <div class="stat-item" title="Achievements">
-                    <span class="stat-icon">&#127942;</span>
+                <div class="stat-item" aria-label="Achievements">
+                    <span class="stat-icon" aria-hidden="true">&#127942;</span>
                     <span id="achievements-count">0</span>
                 </div>
             </div>
 
             <!-- Settings button with dropdown -->
             <div class="settings-wrapper">
-                <button class="settings-btn" id="settings-toggle" title="Settings">
-                    <span>&#9881;</span>
+                <button class="settings-btn" id="settings-toggle" aria-label="Settings">
+                    <span aria-hidden="true">&#9881;</span>
                 </button>
                 <div class="settings-dropdown" id="settings-dropdown">
                     <div class="settings-user">
@@ -64,11 +65,6 @@
                         <span id="sound-icon">&#128264;</span>
                         <span class="settings-label">Sound</span>
                         <span class="settings-status" id="sound-status">OFF</span>
-                    </button>
-                    <button class="settings-item" id="theme-toggle">
-                        <span id="theme-icon">&#9728;</span>
-                        <span class="settings-label">Theme</span>
-                        <span class="settings-status" id="theme-status">Dark</span>
                     </button>
                     <div class="settings-divider"></div>
                     <a href="/logout" class="settings-item settings-logout">
@@ -86,7 +82,7 @@
         <!-- Main content -->
         <main class="main-content">
             <!-- Add task form -->
-            <form class="add-task-form" id="add-task-form">
+            <form class="add-task-form" id="add-task-form" role="form" aria-label="Add new quest">
                 <div class="input-wrapper">
                     <input
                         type="text"
@@ -110,7 +106,13 @@
                     <span class="task-count" id="task-count">(0)</span>
                 </h2>
 
-                <ul class="tasks-list" id="tasks-list">
+                <div class="skeleton-loader" id="skeleton-loader">
+                    <div class="skeleton-task"></div>
+                    <div class="skeleton-task"></div>
+                    <div class="skeleton-task"></div>
+                </div>
+
+                <ul class="tasks-list" id="tasks-list" role="list" aria-live="polite">
                     <!-- Tasks will be rendered here -->
                 </ul>
 
@@ -133,7 +135,7 @@
         </aside>
 
         <!-- Achievement popup -->
-        <div class="achievement-popup" id="achievement-popup">
+        <div class="achievement-popup" id="achievement-popup" role="alert" aria-live="assertive">
             <div class="popup-content">
                 <div class="popup-icon" id="popup-icon">&#127942;</div>
                 <div class="popup-title">Achievement Unlocked!</div>
@@ -143,7 +145,7 @@
         </div>
 
         <!-- Level up popup -->
-        <div class="levelup-popup" id="levelup-popup">
+        <div class="levelup-popup" id="levelup-popup" role="dialog" aria-live="assertive" aria-label="Level up notification">
             <div class="levelup-content">
                 <div class="levelup-stars">&#10024; &#10024; &#10024;</div>
                 <div class="levelup-title">LEVEL UP!</div>

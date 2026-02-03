@@ -3,29 +3,46 @@
 const $ = id => document.getElementById(id);
 const esc = t => t.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[c]);
 
+// ========== CONSTANTS ==========
+const COMBO_TIMEOUT_MS = 5000;
+const TASK_COMPLETE_ANIMATION_MS = 600;
+const TASK_DELETE_ANIMATION_MS = 300;
+const ACHIEVEMENT_POPUP_MS = 3500;
+const LEVELUP_POPUP_MS = 2500;
+const DEBOUNCE_DELAY_MS = 300;
+
 // ========== STATE ==========
 let state = {
   tasks: [], level: 1, xp: 0, xpMax: 100, combo: 0, completed: 0,
-  achievements: {}, streak: 0, sound: false, theme: 'dark'
+  achievements: {}, streak: 0, sound: false
 };
 let comboTimer = null;
 let audioCtx = null;
 
+// ========== UTILITIES ==========
+function debounce(fn, delay) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delay);
+  };
+}
+
 // ========== ACHIEVEMENTS ==========
 const ACHIEVEMENTS = [
-  { id: 'firstQuest', name: 'First Steps', desc: 'Complete your first quest', icon: '&#127941;' },
-  { id: 'fiveQuests', name: 'Adventurer', desc: 'Complete 5 quests', icon: '&#9876;' },
-  { id: 'tenQuests', name: 'Veteran', desc: 'Complete 10 quests', icon: '&#128737;' },
-  { id: 'twentyFiveQuests', name: 'Hero', desc: 'Complete 25 quests', icon: '&#129409;' },
-  { id: 'fiftyQuests', name: 'Legend', desc: 'Complete 50 quests', icon: '&#128081;' },
-  { id: 'combo3', name: 'Combo Starter', desc: 'Reach 3x combo', icon: '&#128293;' },
-  { id: 'combo5', name: 'On Fire!', desc: 'Reach 5x combo', icon: '&#9889;' },
-  { id: 'combo10', name: 'Unstoppable', desc: 'Reach 10x combo', icon: '&#127775;' },
-  { id: 'level5', name: 'Rising Star', desc: 'Reach level 5', icon: '&#11088;' },
-  { id: 'level10', name: 'Master', desc: 'Reach level 10', icon: '&#128142;' },
-  { id: 'streak7', name: 'Week Warrior', desc: 'Maintain a 7-day streak', icon: '&#128170;' },
-  { id: 'streak30', name: 'Month Master', desc: 'Maintain a 30-day streak', icon: '&#127942;' },
-];
+  ['firstQuest', 'First Steps', 'Complete your first quest', '&#127941;'],
+  ['fiveQuests', 'Adventurer', 'Complete 5 quests', '&#9876;'],
+  ['tenQuests', 'Veteran', 'Complete 10 quests', '&#128737;'],
+  ['twentyFiveQuests', 'Hero', 'Complete 25 quests', '&#129409;'],
+  ['fiftyQuests', 'Legend', 'Complete 50 quests', '&#128081;'],
+  ['combo3', 'Combo Starter', 'Reach 3x combo', '&#128293;'],
+  ['combo5', 'On Fire!', 'Reach 5x combo', '&#9889;'],
+  ['combo10', 'Unstoppable', 'Reach 10x combo', '&#127775;'],
+  ['level5', 'Rising Star', 'Reach level 5', '&#11088;'],
+  ['level10', 'Master', 'Reach level 10', '&#128142;'],
+  ['streak7', 'Week Warrior', 'Maintain a 7-day streak', '&#128170;'],
+  ['streak30', 'Month Master', 'Maintain a 30-day streak', '&#127942;'],
+].map(([id, name, desc, icon]) => ({ id, name, desc, icon }));
 
 // ========== API HELPERS ==========
 async function api(url, options = {}) {
@@ -50,30 +67,32 @@ async function loadState() {
     renderAchievements();
     updateUI();
   }
+  // Hide skeleton loader
+  $('skeleton-loader')?.classList.add('hidden');
 }
 
 // ========== SOUND ==========
-function initAudio() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-}
+function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
 
 function playSound(type) {
   if (!audioCtx || !state.sound) return;
   const now = audioCtx.currentTime;
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.connect(gain);
-  gain.connect(audioCtx.destination);
-
-  const sounds = {
-    add: () => { osc.frequency.setValueAtTime(400, now); osc.frequency.exponentialRampToValueAtTime(600, now + 0.1); gain.gain.setValueAtTime(0.3, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15); osc.start(now); osc.stop(now + 0.15); },
-    complete: () => { [523.25, 659.25, 783.99].forEach((f, i) => { osc.frequency.setValueAtTime(f, now + i * 0.1); }); gain.gain.setValueAtTime(0.3, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35); osc.start(now); osc.stop(now + 0.35); },
-    combo: () => { const f = 600 + state.combo * 50; osc.type = 'square'; osc.frequency.setValueAtTime(f, now); osc.frequency.exponentialRampToValueAtTime(f + 200, now + 0.1); gain.gain.setValueAtTime(0.2, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15); osc.start(now); osc.stop(now + 0.15); },
-    levelup: () => { [523.25, 659.25, 783.99, 1046.50].forEach((f, i) => { const o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.frequency.setValueAtTime(f, now + i * 0.15); g.gain.setValueAtTime(0.3, now + i * 0.15); g.gain.exponentialRampToValueAtTime(0.01, now + i * 0.15 + 0.2); o.start(now + i * 0.15); o.stop(now + i * 0.15 + 0.2); }); return; },
-    achievement: () => { osc.type = 'triangle'; osc.frequency.setValueAtTime(800, now); osc.frequency.exponentialRampToValueAtTime(1200, now + 0.2); osc.frequency.exponentialRampToValueAtTime(1600, now + 0.4); gain.gain.setValueAtTime(0.25, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5); osc.start(now); osc.stop(now + 0.5); },
-    delete: () => { osc.frequency.setValueAtTime(300, now); osc.frequency.exponentialRampToValueAtTime(100, now + 0.15); gain.gain.setValueAtTime(0.2, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15); osc.start(now); osc.stop(now + 0.15); }
+  const play = (freq, dur, vol = 0.3, wave = 'sine') => {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = wave; o.connect(g); g.connect(audioCtx.destination);
+    o.frequency.setValueAtTime(freq[0], now); o.frequency.exponentialRampToValueAtTime(freq[1], now + dur);
+    g.gain.setValueAtTime(vol, now); g.gain.exponentialRampToValueAtTime(0.01, now + dur);
+    o.start(now); o.stop(now + dur);
   };
-  sounds[type]?.();
+  const cfg = {
+    add: () => play([400, 600], 0.15),
+    complete: () => { [523, 659, 784].forEach((f, i) => play([f, f], 0.12, 0.25)); },
+    combo: () => { const f = 600 + state.combo * 50; play([f, f + 200], 0.15, 0.2, 'square'); },
+    levelup: () => [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => play([f, f], 0.2), i * 150)),
+    achievement: () => play([800, 1600], 0.5, 0.25, 'triangle'),
+    delete: () => play([300, 100], 0.15, 0.2)
+  };
+  cfg[type]?.();
 }
 
 // ========== PARTICLES ==========
@@ -92,31 +111,14 @@ function particles(x, y, isLevelup = false) {
 
 // ========== UI UPDATE ==========
 function updateUI() {
-  $('level').textContent = state.level;
-  $('xp').textContent = state.xp;
-  $('xp-max').textContent = state.xpMax;
+  const txt = { level: state.level, xp: state.xp, 'xp-max': state.xpMax, 'tasks-completed': state.completed,
+    'streak-count': state.streak, 'achievements-count': Object.keys(state.achievements).length, 'task-count': `(${state.tasks.length})` };
+  for (const [id, val] of Object.entries(txt)) $(id).textContent = val;
   $('xp-fill').style.width = (state.xp / state.xpMax * 100) + '%';
-  $('tasks-completed').textContent = state.completed;
-  $('streak-count').textContent = state.streak;
-  $('achievements-count').textContent = Object.keys(state.achievements).length;
-  $('task-count').textContent = `(${state.tasks.length})`;
-
-  // Combo
-  if (state.combo > 0) {
-    $('combo-container').classList.add('active');
-    $('combo').textContent = state.combo;
-  } else {
-    $('combo-container').classList.remove('active');
-  }
-
-  // Sound icon and status
+  $('combo-container').classList.toggle('active', state.combo > 0);
+  if (state.combo > 0) $('combo').textContent = state.combo;
   $('sound-icon').innerHTML = state.sound ? '&#128266;' : '&#128263;';
-  if ($('sound-status')) $('sound-status').textContent = state.sound ? 'ON' : 'OFF';
-
-  // Theme
-  document.documentElement.setAttribute('data-theme', state.theme);
-  $('theme-icon').innerHTML = state.theme === 'light' ? '&#9790;' : '&#9728;';
-  if ($('theme-status')) $('theme-status').textContent = state.theme === 'light' ? 'Light' : 'Dark';
+  const ss = $('sound-status'); if (ss) ss.textContent = state.sound ? 'ON' : 'OFF';
 }
 
 // ========== RENDER TASKS ==========
@@ -130,18 +132,19 @@ function renderTasks() {
     li.className = 'task-item';
     li.dataset.id = task.id;
     li.innerHTML = `
-      <label class="task-checkbox"><input type="checkbox"><span class="checkbox-custom"></span></label>
+      <label class="task-checkbox"><input type="checkbox" aria-label="Complete quest"><span class="checkbox-custom"></span></label>
       <span class="task-text">${esc(task.text)}</span>
       <span class="task-xp">+${task.xp} XP</span>
-      <button class="task-delete">&#128465;</button>`;
+      <button class="task-delete" aria-label="Delete quest">&#128465;</button>`;
 
     li.querySelector('input').onchange = () => completeTask(task.id, li);
     li.querySelector('.task-delete').onclick = () => deleteTask(task.id, li);
 
     const textEl = li.querySelector('.task-text');
     let original = task.text;
+    const debouncedEdit = debounce((id, text) => editTask(id, text), DEBOUNCE_DELAY_MS);
     textEl.onclick = e => { e.stopPropagation(); original = task.text; textEl.contentEditable = 'true'; textEl.focus(); document.getSelection().selectAllChildren(textEl); };
-    textEl.onblur = () => { textEl.contentEditable = 'false'; editTask(task.id, textEl.textContent); };
+    textEl.onblur = () => { textEl.contentEditable = 'false'; debouncedEdit(task.id, textEl.textContent); };
     textEl.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); textEl.blur(); } else if (e.key === 'Escape') { textEl.textContent = original; textEl.contentEditable = 'false'; } };
 
     list.appendChild(li);
@@ -160,26 +163,18 @@ function renderAchievements() {
 }
 
 // ========== POPUPS ==========
-function showAchievement(achievementId) {
-  const a = ACHIEVEMENTS.find(ach => ach.id === achievementId);
-  if (!a) return;
-
-  $('popup-icon').innerHTML = a.icon;
-  $('popup-name').textContent = a.name;
-  $('popup-desc').textContent = a.desc;
-  $('achievement-popup').classList.add('show');
-  playSound('achievement');
-  setTimeout(() => { const r = $('achievement-popup').getBoundingClientRect(); particles(r.left + r.width / 2, r.top + r.height / 2); }, 100);
-  setTimeout(() => $('achievement-popup').classList.remove('show'), 3500);
-}
-
-function showLevelUp() {
-  $('new-level').textContent = state.level;
-  $('levelup-popup').classList.add('show');
-  const r = $('levelup-popup').getBoundingClientRect();
-  particles(r.left + r.width / 2, r.top + r.height / 2, true);
-  playSound('levelup');
-  setTimeout(() => $('levelup-popup').classList.remove('show'), 2500);
+function showPopup(type, data) {
+  const isAch = type === 'achievement';
+  const popup = $(isAch ? 'achievement-popup' : 'levelup-popup');
+  if (isAch) {
+    const a = ACHIEVEMENTS.find(x => x.id === data);
+    if (!a) return;
+    $('popup-icon').innerHTML = a.icon; $('popup-name').textContent = a.name; $('popup-desc').textContent = a.desc;
+  } else $('new-level').textContent = state.level;
+  popup.classList.add('show');
+  playSound(isAch ? 'achievement' : 'levelup');
+  setTimeout(() => { const r = popup.getBoundingClientRect(); particles(r.left + r.width / 2, r.top + r.height / 2, !isAch); }, 100);
+  setTimeout(() => popup.classList.remove('show'), isAch ? ACHIEVEMENT_POPUP_MS : LEVELUP_POPUP_MS);
 }
 
 // ========== TASK ACTIONS ==========
@@ -227,29 +222,27 @@ async function completeTask(id, el) {
       if (result.newAchievements && result.newAchievements.length > 0) {
         result.newAchievements.forEach((achId, i) => {
           state.achievements[achId] = true;
-          setTimeout(() => showAchievement(achId), i * 500);
+          setTimeout(() => showPopup('achievement', achId), i * 500);
         });
       }
 
       // Show level up
-      if (result.leveledUp) {
-        showLevelUp();
-      }
+      if (result.leveledUp) showPopup('levelup');
 
       if (state.combo > 1) playSound('combo');
 
-      // Start combo timer - will reset combo after 5 seconds
+      // Start combo timer - will reset combo after timeout
       comboTimer = setTimeout(async () => {
         await api('/api/combo/reset', { method: 'POST' });
         state.combo = 0;
         updateUI();
-      }, 5000);
+      }, COMBO_TIMEOUT_MS);
 
       renderTasks();
       renderAchievements();
       updateUI();
     }
-  }, 600);
+  }, TASK_COMPLETE_ANIMATION_MS);
 }
 
 async function deleteTask(id, el) {
@@ -261,7 +254,7 @@ async function deleteTask(id, el) {
   setTimeout(() => {
     state.tasks = state.tasks.filter(t => t.id !== id);
     renderTasks();
-  }, 300);
+  }, TASK_DELETE_ANIMATION_MS);
 }
 
 async function editTask(id, newText) {
@@ -289,52 +282,31 @@ $('add-task-form').onsubmit = e => {
   $('task-input').focus();
 };
 
-$('sound-toggle').onclick = async () => {
-  initAudio();
-  state.sound = !state.sound;
-  await api('/api/settings', {
-    method: 'PUT',
-    body: JSON.stringify({ sound: state.sound })
-  });
+async function toggleSetting(key, transform = v => !v) {
+  if (key === 'sound') initAudio();
+  state[key] = transform(state[key]);
+  await api('/api/settings', { method: 'PUT', body: JSON.stringify({ [key]: state[key] }) });
   updateUI();
   if (state.sound) playSound('add');
-};
-
-$('theme-toggle').onclick = async () => {
-  state.theme = state.theme === 'dark' ? 'light' : 'dark';
-  await api('/api/settings', {
-    method: 'PUT',
-    body: JSON.stringify({ theme: state.theme })
-  });
-  updateUI();
-  playSound('add');
-};
+}
+$('sound-toggle').onclick = () => toggleSetting('sound');
 
 document.addEventListener('click', initAudio, { once: true });
 document.addEventListener('keydown', initAudio, { once: true });
 
 // ========== SETTINGS DROPDOWN ==========
-const settingsToggle = $('settings-toggle');
-const settingsDropdown = $('settings-dropdown');
+const [sToggle, sDrop] = [$('settings-toggle'), $('settings-dropdown')];
+sToggle.onclick = e => { e.stopPropagation(); sDrop.classList.toggle('show'); };
+document.addEventListener('click', e => { if (!sDrop.contains(e.target) && !sToggle.contains(e.target)) sDrop.classList.remove('show'); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') sDrop.classList.remove('show'); });
 
-settingsToggle.addEventListener('click', (e) => {
-  e.stopPropagation();
-  settingsDropdown.classList.toggle('show');
-});
-
-// Close dropdown when clicking outside
-document.addEventListener('click', (e) => {
-  if (!settingsDropdown.contains(e.target) && !settingsToggle.contains(e.target)) {
-    settingsDropdown.classList.remove('show');
+// ========== HORIZONTAL SCROLL ==========
+$('achievements-grid')?.addEventListener('wheel', e => {
+  if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+    e.preventDefault();
+    e.currentTarget.scrollLeft += e.deltaY;
   }
-});
-
-// Close dropdown on escape
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    settingsDropdown.classList.remove('show');
-  }
-});
+}, { passive: false });
 
 // ========== INIT ==========
 // Inject particle animation

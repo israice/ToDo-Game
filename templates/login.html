@@ -23,7 +23,7 @@
     </div>
 
     <div id="login" class="form active">
-        {% if error %}<div class="error">{{ error }}</div>{% endif %}
+        {% if error or register_error %}<div class="error">{{ error or register_error }}</div>{% endif %}
         <form method="post" action="/login">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input name="username" placeholder="Username" required>
@@ -45,7 +45,7 @@
         function show(id) {
             document.querySelectorAll('.form, .tab').forEach(e => e.classList.remove('active'));
             document.getElementById(id).classList.add('active');
-            event.target.classList.add('active');
+            document.querySelector(`.tab:nth-child(${id === 'login' ? 1 : 2})`).classList.add('active');
         }
     </script>
 </body>
