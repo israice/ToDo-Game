@@ -7,6 +7,7 @@ import hmac
 import subprocess
 from datetime import datetime, date
 from flask import Flask, request, redirect, session, render_template, jsonify
+from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 import bcrypt
 from flask_wtf.csrf import CSRFProtect
@@ -15,6 +16,7 @@ import sqlite3
 load_dotenv()
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.secret_key = os.environ.get('SECRET_KEY')
 if not app.secret_key:
     raise RuntimeError("SECRET_KEY environment variable is required")
@@ -464,7 +466,9 @@ def webhook():
     return "OK", 200
 
 
+# Initialize database on module load (for gunicorn)
+init_db()
+
 if __name__ == '__main__':
-    init_db()
     debug_mode = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
     app.run(debug=debug_mode)
