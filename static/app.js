@@ -14,7 +14,7 @@ const DEBOUNCE_DELAY_MS = 300;
 // ========== STATE ==========
 let state = {
   tasks: [], level: 1, xp: 0, xpMax: 100, combo: 0, completed: 0,
-  achievements: {}, streak: 0, sound: false
+  achievements: {}, streak: 0, sound: false, history: []
 };
 let comboTimer = null;
 let audioCtx = null;
@@ -187,8 +187,19 @@ async function addTask(text) {
   });
 
   if (result && result.id) {
-    state.tasks.unshift(result);
+    state.tasks.unshift({ id: result.id, text: result.text, xp: result.xp });
+
+    // +3 XP за создание задачи
+    if (result.xpEarned) {
+      state.level = result.level;
+      state.xp = result.currentXp;
+      state.xpMax = result.xpMax;
+      addToHistory('Создание задачи', result.xpEarned);
+      if (result.leveledUp) showPopup('levelup');
+    }
+
     renderTasks();
+    updateUI();
     playSound('add');
   }
 }
@@ -218,10 +229,15 @@ async function completeTask(id, el) {
       state.streak = result.streak;
       state.combo = result.combo;
 
+      // Add to history
+      addToHistory('Выполнение задачи', result.xpEarned);
+
       // Show achievements
       if (result.newAchievements && result.newAchievements.length > 0) {
         result.newAchievements.forEach((achId, i) => {
           state.achievements[achId] = true;
+          const ach = ACHIEVEMENTS.find(a => a.id === achId);
+          if (ach) addToHistory(ach.name, 100, ach.icon);
           setTimeout(() => showPopup('achievement', achId), i * 500);
         });
       }
@@ -301,6 +317,125 @@ sToggle.onclick = e => { e.stopPropagation(); sDrop.classList.toggle('show'); };
 document.addEventListener('click', e => { if (!sDrop.contains(e.target) && !sToggle.contains(e.target)) sDrop.classList.remove('show'); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') sDrop.classList.remove('show'); });
 
+// ========== TABS ==========
+function initTabs() {
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  const tabContents = document.querySelectorAll('.tab-content');
+  const subtabsNav = $('subtabs-nav');
+
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tabId = btn.dataset.tab;
+
+      // Update active button and aria
+      tabBtns.forEach(b => {
+        b.classList.remove('active');
+        b.setAttribute('aria-selected', 'false');
+      });
+      btn.classList.add('active');
+      btn.setAttribute('aria-selected', 'true');
+
+      // Show selected content
+      tabContents.forEach(content => {
+        content.style.display = content.id === `tab-${tabId}` ? 'block' : 'none';
+      });
+
+      // Show/hide subtabs for SOCIAL tab
+      subtabsNav.classList.toggle('show', tabId === 'social');
+
+      // Render content if needed
+      if (tabId === 'history') renderHistory();
+    });
+  });
+}
+
+// ========== SOCIAL SUB-TABS ==========
+function initSubTabs() {
+  const subtabBtns = document.querySelectorAll('.subtab-btn');
+  const subtabContents = document.querySelectorAll('.subtab-content');
+
+  subtabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const subtabId = btn.dataset.subtab;
+
+      // Update active button
+      subtabBtns.forEach(b => {
+        b.classList.remove('active');
+        b.setAttribute('aria-selected', 'false');
+      });
+      btn.classList.add('active');
+      btn.setAttribute('aria-selected', 'true');
+
+      // Show selected content
+      subtabContents.forEach(content => {
+        content.style.display = content.id === `subtab-${subtabId}` ? 'block' : 'none';
+      });
+    });
+  });
+}
+
+// ========== HISTORY ==========
+function addToHistory(action, points, icon = null) {
+  const item = {
+    id: Date.now(),
+    action: action,
+    icon: icon,
+    points: points,
+    timestamp: new Date().toISOString()
+  };
+
+  state.history = state.history || [];
+  state.history.unshift(item);
+
+  // Keep last 50 entries
+  if (state.history.length > 50) {
+    state.history = state.history.slice(0, 50);
+  }
+
+  // Save to localStorage
+  localStorage.setItem('questTodoHistory', JSON.stringify(state.history));
+}
+
+function loadHistory() {
+  try {
+    const saved = localStorage.getItem('questTodoHistory');
+    if (saved) {
+      state.history = JSON.parse(saved);
+    }
+  } catch (e) {
+    state.history = [];
+  }
+}
+
+function renderHistory() {
+  const list = $('history-list');
+  const empty = $('history-empty');
+
+  // Only show entries with XP
+  const xpHistory = (state.history || []).filter(item => item.points > 0);
+
+  if (xpHistory.length === 0) {
+    list.innerHTML = '';
+    empty.classList.add('show');
+    return;
+  }
+
+  empty.classList.remove('show');
+  list.innerHTML = xpHistory.map(item => `
+    <li class="history-item">
+      <span class="history-action">${item.icon ? item.icon + ' ' : ''}${esc(item.action)}</span>
+      <span class="history-points">+${item.points} XP</span>
+      <span class="history-time">${formatTime(item.timestamp)}</span>
+    </li>`).join('');
+}
+
+function formatTime(timestamp) {
+  const date = new Date(timestamp);
+  const day = date.toLocaleDateString('ru-RU');
+  const time = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  return `${day} ${time}`;
+}
+
 // ========== HORIZONTAL SCROLL ==========
 $('achievements-grid')?.addEventListener('wheel', e => {
   if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
@@ -314,6 +449,11 @@ $('achievements-grid')?.addEventListener('wheel', e => {
 const style = document.createElement('style');
 style.textContent = `@keyframes particle-float{0%{opacity:1;transform:translate(0,0) scale(1) rotate(0)}100%{opacity:0;transform:translate(var(--tx,0),var(--ty,-100px)) scale(0) rotate(360deg)}}`;
 document.head.appendChild(style);
+
+// Initialize tabs
+initTabs();
+initSubTabs();
+loadHistory();
 
 // Load state from server
 loadState().then(() => {

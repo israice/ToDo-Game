@@ -28,12 +28,12 @@
                 </div>
                 <!-- Settings button with dropdown -->
                 <div class="settings-wrapper">
-                    <button class="settings-btn" id="settings-toggle" aria-label="Настройки">
-                        <span aria-hidden="true">&#9881;</span>
+                    <button class="settings-btn" id="settings-toggle" aria-label="Пользователь">
+                        <span class="user-icon"></span>
                     </button>
                     <div class="settings-dropdown" id="settings-dropdown">
                         <div class="settings-user">
-                            <span class="user-icon">&#128100;</span>
+                            <span class="user-icon"></span>
                             <span class="user-name">{{ user }}</span>
                         </div>
                         <div class="settings-divider"></div>
@@ -47,6 +47,11 @@
                             <span>&#128736;</span>
                             <span class="settings-label">Версия</span>
                             <span class="settings-status">{{ version }}</span>
+                        </button>
+                        <div class="settings-divider"></div>
+                        <button class="settings-item" id="settings-btn">
+                            <span>&#9881;</span>
+                            <span class="settings-label">Настройки</span>
                         </button>
                         <div class="settings-divider"></div>
                         <a href="/logout" class="settings-item settings-logout">
@@ -84,58 +89,109 @@
 
         <!-- Main content -->
         <main class="main-content">
-            <!-- Add task form -->
-            <form class="add-task-form" id="add-task-form" role="form" aria-label="Добавить новый квест">
-                <div class="input-wrapper">
-                    <input
-                        type="text"
-                        id="task-input"
-                        placeholder="Какой квест ждёт тебя сегодня?"
-                        autocomplete="off"
-                        maxlength="100"
-                    >
-                    <button type="submit" class="add-btn" id="add-btn">
-                        <span class="btn-icon">+</span>
-                        <span class="btn-text">Добавить</span>
-                    </button>
+            <!-- Tabs Navigation Container -->
+            <div class="tabs-container" id="tabs-container">
+                <nav class="tabs-nav" id="tabs-nav" role="tablist">
+                    <button class="tab-btn active" data-tab="todo" role="tab" aria-selected="true" aria-controls="tab-todo">TODO</button>
+                    <button class="tab-btn" data-tab="social" role="tab" aria-selected="false" aria-controls="tab-social">SOCIAL</button>
+                    <button class="tab-btn" data-tab="history" role="tab" aria-selected="false" aria-controls="tab-history">HISTORY</button>
+                </nav>
+                <nav class="subtabs-nav" id="subtabs-nav" role="tablist">
+                    <button class="subtab-btn active" data-subtab="friends" role="tab" aria-selected="true">FRIENDS</button>
+                    <button class="subtab-btn" data-subtab="search" role="tab" aria-selected="false">SEARCH</button>
+                </nav>
+            </div>
+
+            <!-- Tab: TODO -->
+            <div class="tab-content" id="tab-todo" role="tabpanel" style="display: block;">
+                <!-- Add task form -->
+                <form class="add-task-form" id="add-task-form" role="form" aria-label="Добавить новый квест">
+                    <div class="input-wrapper">
+                        <input
+                            type="text"
+                            id="task-input"
+                            placeholder="Какой квест ждёт тебя сегодня?"
+                            autocomplete="off"
+                            maxlength="100"
+                        >
+                        <button type="submit" class="add-btn" id="add-btn">
+                            <span class="btn-icon">+</span>
+                            <span class="btn-text">Добавить</span>
+                        </button>
+                    </div>
+                </form>
+
+                <!-- Tasks list -->
+                <div class="tasks-section">
+                    <h2 class="section-title">
+                        <span class="title-icon">&#128221;</span>
+                        Активные квесты
+                        <span class="task-count" id="task-count">(0)</span>
+                    </h2>
+
+                    <div class="skeleton-loader" id="skeleton-loader">
+                        <div class="skeleton-task"></div>
+                        <div class="skeleton-task"></div>
+                        <div class="skeleton-task"></div>
+                    </div>
+
+                    <ul class="tasks-list" id="tasks-list" role="list" aria-live="polite">
+                        <!-- Tasks will be rendered here -->
+                    </ul>
+
+                    <div class="empty-state" id="empty-state">
+                        <div class="empty-icon">&#127919;</div>
+                        <p>Квестов пока нет!</p>
+                        <p class="empty-hint">Добавь свой первый квест выше</p>
+                    </div>
                 </div>
-            </form>
 
-            <!-- Tasks list -->
-            <div class="tasks-section">
-                <h2 class="section-title">
-                    <span class="title-icon">&#128221;</span>
-                    Активные квесты
-                    <span class="task-count" id="task-count">(0)</span>
-                </h2>
+                <!-- Achievements panel -->
+                <aside class="achievements-panel" id="achievements-panel">
+                    <h3 class="panel-title">
+                        <span>&#127942;</span> Достижения
+                    </h3>
+                    <div class="achievements-grid" id="achievements-grid">
+                        <!-- Achievements will be rendered here -->
+                    </div>
+                </aside>
+            </div>
 
-                <div class="skeleton-loader" id="skeleton-loader">
-                    <div class="skeleton-task"></div>
-                    <div class="skeleton-task"></div>
-                    <div class="skeleton-task"></div>
+            <!-- Tab: SOCIAL -->
+            <div class="tab-content" id="tab-social" role="tabpanel" style="display: none;">
+                <!-- Sub-tab: FRIENDS (default) -->
+                <div class="subtab-content" id="subtab-friends" style="display: block;">
+                    <div class="social-feed" id="social-feed">
+                        <div class="empty-state show">
+                            <div class="empty-icon">&#128101;</div>
+                            <p>Лента активности друзей</p>
+                            <p class="empty-hint">Скоро здесь появятся обновления</p>
+                        </div>
+                    </div>
                 </div>
 
-                <ul class="tasks-list" id="tasks-list" role="list" aria-live="polite">
-                    <!-- Tasks will be rendered here -->
+                <!-- Sub-tab: SEARCH -->
+                <div class="subtab-content" id="subtab-search" style="display: none;">
+                    <div class="empty-state show">
+                        <div class="empty-icon">&#128269;</div>
+                        <p>Поиск пользователей</p>
+                        <p class="empty-hint">Скоро здесь можно будет найти друзей</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab: HISTORY -->
+            <div class="tab-content" id="tab-history" role="tabpanel" style="display: none;">
+                <ul class="history-list" id="history-list">
+                    <!-- History items will be rendered here -->
                 </ul>
-
-                <div class="empty-state" id="empty-state">
-                    <div class="empty-icon">&#127919;</div>
-                    <p>Квестов пока нет!</p>
-                    <p class="empty-hint">Добавь свой первый квест выше</p>
+                <div class="empty-state" id="history-empty">
+                    <div class="empty-icon">&#128220;</div>
+                    <p>История пока пуста</p>
+                    <p class="empty-hint">Выполняй квесты, чтобы увидеть историю</p>
                 </div>
             </div>
         </main>
-
-        <!-- Achievements panel -->
-        <aside class="achievements-panel" id="achievements-panel">
-            <h3 class="panel-title">
-                <span>&#127942;</span> Достижения
-            </h3>
-            <div class="achievements-grid" id="achievements-grid">
-                <!-- Achievements will be rendered here -->
-            </div>
-        </aside>
 
         <!-- Achievement popup -->
         <div class="achievement-popup" id="achievement-popup" role="alert" aria-live="assertive">

@@ -96,6 +96,19 @@ def get_or_create_progress(conn, user_id):
         return {'level': 1, 'xp': 0, 'xp_max': 100, 'completed_tasks': 0, 'current_streak': 0, 'combo': 0, 'sound_enabled': 0}
     return dict(progress)
 
+def apply_xp(progress, xp_amount):
+    """Apply XP and handle level ups. Returns (new_xp, new_level, new_xp_max, leveled_up)"""
+    new_xp = progress['xp'] + xp_amount
+    new_level = progress['level']
+    new_xp_max = progress['xp_max']
+    leveled_up = False
+    while new_xp >= new_xp_max:
+        new_xp -= new_xp_max
+        new_level += 1
+        new_xp_max = int(100 * math.pow(1.2, new_level - 1))
+        leveled_up = True
+    return new_xp, new_level, new_xp_max, leveled_up
+
 def get_version():
     try:
         with open(os.path.join(os.path.dirname(__file__), 'VERSION.md'), 'r', encoding='utf-8') as f:
@@ -182,8 +195,17 @@ def api_create_task(conn, user_id):
     xp = random.randint(20, 35)
     conn.execute('INSERT INTO tasks (id, user_id, text, xp_reward) VALUES (?, ?, ?, ?)',
                  (task_id, user_id, data['text'].strip(), xp))
+
+    # +3 XP за создание задачи
+    progress = get_or_create_progress(conn, user_id)
+    new_xp, new_level, new_xp_max, leveled_up = apply_xp(progress, 3)
+    conn.execute('UPDATE user_progress SET xp=?, level=?, xp_max=? WHERE user_id=?',
+                 (new_xp, new_level, new_xp_max, user_id))
     conn.commit()
-    return jsonify({'id': task_id, 'text': data['text'].strip(), 'xp': xp})
+    return jsonify({
+        'id': task_id, 'text': data['text'].strip(), 'xp': xp,
+        'xpEarned': 3, 'level': new_level, 'currentXp': new_xp, 'xpMax': new_xp_max, 'leveledUp': leveled_up
+    })
 
 @app.route('/api/tasks/<task_id>', methods=['PUT'])
 @csrf.exempt
@@ -217,12 +239,7 @@ def api_complete_task(conn, user_id, task_id):
     combo = client_combo + 1
     xp_earned = int(task['xp_reward'] * (1 + combo * 0.1))
 
-    new_xp, new_level, new_xp_max, leveled_up = progress['xp'] + xp_earned, progress['level'], progress['xp_max'], False
-    while new_xp >= new_xp_max:
-        new_xp -= new_xp_max
-        new_level += 1
-        new_xp_max = int(100 * math.pow(1.2, new_level - 1))
-        leveled_up = True
+    new_xp, new_level, new_xp_max, leveled_up = apply_xp(progress, xp_earned)
 
     today, last_date = date.today().isoformat(), progress['last_completion_date']
     new_streak = progress['current_streak']
@@ -234,16 +251,24 @@ def api_complete_task(conn, user_id, task_id):
             new_streak = 1
     new_completed = progress['completed_tasks'] + 1
 
-    conn.execute('''UPDATE user_progress SET level=?, xp=?, xp_max=?, completed_tasks=?,
-                    current_streak=?, combo=?, last_completion_date=? WHERE user_id=?''',
-                 (new_level, new_xp, new_xp_max, new_completed, new_streak, combo, today, user_id))
-    conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
-
     state = {'completed': new_completed, 'combo': combo, 'level': new_level, 'streak': new_streak}
     existing = {a['achievement_id'] for a in conn.execute('SELECT achievement_id FROM user_achievements WHERE user_id = ?', (user_id,))}
     new_achievements = [ach['id'] for ach in ACHIEVEMENTS if ach['id'] not in existing and ach['check'](state)]
     for ach_id in new_achievements:
         conn.execute('INSERT INTO user_achievements (user_id, achievement_id) VALUES (?, ?)', (user_id, ach_id))
+
+    # +100 XP за каждое новое достижение
+    achievement_xp = len(new_achievements) * 100
+    if achievement_xp > 0:
+        temp_progress = {'xp': new_xp, 'level': new_level, 'xp_max': new_xp_max}
+        new_xp, new_level, new_xp_max, ach_leveled = apply_xp(temp_progress, achievement_xp)
+        leveled_up = leveled_up or ach_leveled
+        xp_earned += achievement_xp
+
+    conn.execute('''UPDATE user_progress SET level=?, xp=?, xp_max=?, completed_tasks=?,
+                    current_streak=?, combo=?, last_completion_date=? WHERE user_id=?''',
+                 (new_level, new_xp, new_xp_max, new_completed, new_streak, combo, today, user_id))
+    conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
     conn.commit()
 
     return jsonify({
