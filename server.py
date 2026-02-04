@@ -397,13 +397,20 @@ def api_search_users(conn, user_id):
     if len(query) < 2:
         return jsonify({'users': []})
 
-    users = conn.execute('''
+    # Search by username OR by exact ID
+    params = [f'%{query}%', user_id]
+    id_condition = ''
+    if query.isdigit():
+        id_condition = 'OR u.id = ?'
+        params.insert(1, int(query))
+
+    users = conn.execute(f'''
         SELECT u.id, u.username, COALESCE(p.level, 1) as level
         FROM users u
         LEFT JOIN user_progress p ON u.id = p.user_id
-        WHERE u.username LIKE ? AND u.id != ?
+        WHERE (u.username LIKE ? {id_condition}) AND u.id != ?
         LIMIT 20
-    ''', (f'%{query}%', user_id)).fetchall()
+    ''', params).fetchall()
 
     result = []
     for u in users:

@@ -485,13 +485,15 @@ function renderSearchResults(users) {
   const container = $('search-results');
   const empty = $('search-empty');
 
+  if (!container) return;
+
   if (!users || users.length === 0) {
     container.innerHTML = '';
-    empty.classList.add('show');
+    empty?.classList.add('show');
     return;
   }
 
-  empty.classList.remove('show');
+  empty?.classList.remove('show');
   container.innerHTML = users.map(user => {
     let btnClass = 'add-friend-btn';
     let btnText = 'Добавить';
