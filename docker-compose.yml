@@ -27,7 +27,7 @@ services:
       - bot_data:/app
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - API_URL=http://todo-game:5000
+      - API_URL=http://web:5000
       - ADMIN_TELEGRAM_ID=${ADMIN_TELEGRAM_ID}
     depends_on:
       - web
