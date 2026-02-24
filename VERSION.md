@@ -29,7 +29,7 @@ python server.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.29 - server auto update test 3"
+git commit -m "v0.0.30 - server auto update test 4"
 git push
 python server.py
 
@@ -63,3 +63,4 @@ v0.0.26 - Modify docker-compose.yml to mount Docker socket for Telegram bot
 v0.0.27 - server auto update test 1
 v0.0.28 - server auto update test 2
 v0.0.29 - server auto update test 3
+v0.0.30 - server auto update test 4
