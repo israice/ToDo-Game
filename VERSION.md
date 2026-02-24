@@ -11,8 +11,10 @@
 docker compose up -d --build
 
 
-docker logs todo-game -f
-docker logs todo-telegram-bot -f
+docker logs tvlists -f
+docker logs tvlists-caddy -f
+docker logs tvlists-deploy -f
+docker logs tvlists-socket-proxy -f
 
 
 
@@ -29,7 +31,7 @@ python server.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.30 - server auto update test 4"
+git commit -m "v0.0.31 - server auto update test 5"
 git push
 python server.py
 
@@ -64,3 +66,4 @@ v0.0.27 - server auto update test 1
 v0.0.28 - server auto update test 2
 v0.0.29 - server auto update test 3
 v0.0.30 - server auto update test 4
+v0.0.31 - server auto update test 5
