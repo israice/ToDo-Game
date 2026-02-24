@@ -19,6 +19,9 @@ let state = {
 let comboTimer = null;
 let audioCtx = null;
 
+// Generate unique tab ID for multi-tab support
+const TAB_ID = 'tab_' + Math.random().toString(36).substr(2, 9);
+
 // SSE connection
 let eventSource = null;
 let reconnectAttempts = 0;
@@ -74,7 +77,11 @@ const ACHIEVEMENTS = [
 // ========== API HELPERS ==========
 async function api(url, options = {}) {
   const response = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Tab-ID': TAB_ID,  // Send tab ID for multi-tab support
+      ...options.headers
+    },
     ...options
   });
 
@@ -130,7 +137,8 @@ function connectSSE() {
     eventSource.close();
   }
 
-  eventSource = new EventSource('/api/events');
+  // Connect with tabId for multi-tab support
+  eventSource = new EventSource(`/api/events?tabId=${TAB_ID}`);
 
   eventSource.addEventListener('connected', (e) => {
     const data = JSON.parse(e.data);

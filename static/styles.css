@@ -121,13 +121,7 @@ body {
     .xp-fill {
       height: 100%; width: 0%;
       background: linear-gradient(90deg, var(--accent-primary), var(--accent-success));
-      border-radius: 7px; transition: width var(--transition-slow); position: relative;
-
-      &::after {
-        content: ''; position: absolute; inset: 0;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3) 50%, transparent);
-        animation: shine 2s ease-in-out infinite;
-      }
+      border-radius: 7px; transition: width var(--transition-slow);
     }
 
     .xp-text {

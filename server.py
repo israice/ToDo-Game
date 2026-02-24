@@ -54,57 +54,58 @@ def no_cache(response):
 
 class SSEManager:
     def __init__(self):
-        self.clients = {}  # user_id -> list of queues
+        self.clients = {}  # user_id -> list of {queue, tab_id}
         self.lock = Lock()
-    
-    def subscribe(self, user_id):
+
+    def subscribe(self, user_id, tab_id=None):
         """Add client subscription for user"""
         with self.lock:
             if user_id not in self.clients:
                 self.clients[user_id] = []
-            queue = []
-            self.clients[user_id].append(queue)
-            return queue
-    
-    def unsubscribe(self, user_id, queue):
+            client = {'queue': [], 'tab_id': tab_id}
+            self.clients[user_id].append(client)
+            return client
+
+    def unsubscribe(self, user_id, client):
         """Remove client subscription"""
         with self.lock:
             if user_id in self.clients:
                 try:
-                    self.clients[user_id].remove(queue)
+                    self.clients[user_id].remove(client)
                 except ValueError:
                     pass
                 if not self.clients[user_id]:
                     del self.clients[user_id]
-    
-    def broadcast(self, user_id, event_type, data):
-        """Send event to all clients of user"""
+
+    def broadcast(self, user_id, event_type, data, source_tab_id=None):
+        """Send event to all clients of user except source tab"""
         with self.lock:
             if user_id not in self.clients:
                 return
-            
-            message = f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
-            
-            dead_queues = []
-            for queue in self.clients[user_id]:
+
+            dead_clients = []
+            for client in self.clients[user_id]:
+                # Skip the tab that originated the event
+                if source_tab_id and client['tab_id'] == source_tab_id:
+                    continue
                 try:
-                    queue.append(message)
+                    client['queue'].append(f"event: {event_type}\ndata: {json.dumps(data)}\n\n")
                 except:
-                    dead_queues.append(queue)
-            
-            # Clean up dead queues
-            for dq in dead_queues:
+                    dead_clients.append(client)
+
+            # Clean up dead clients
+            for dc in dead_clients:
                 try:
-                    self.clients[user_id].remove(dq)
+                    self.clients[user_id].remove(dc)
                 except:
                     pass
 
 # Global SSE manager
 sse_manager = SSEManager()
 
-def send_user_event(user_id, event_type, data):
-    """Helper to send event to all user clients"""
-    sse_manager.broadcast(user_id, event_type, data)
+def send_user_event(user_id, event_type, data, source_tab_id=None):
+    """Helper to send event to all user clients except source tab"""
+    sse_manager.broadcast(user_id, event_type, data, source_tab_id)
 
 # ============== DB Helpers ==============
 
@@ -279,31 +280,32 @@ def api_events():
     """Server-Sent Events endpoint for real-time updates"""
     if 'user' not in session:
         return Response('Unauthorized\n', status=401, mimetype='text/plain')
-    
+
     with get_db() as conn:
         user = conn.execute('SELECT id FROM users WHERE username = ?', (session['user'],)).fetchone()
         if not user:
             return Response('Unauthorized\n', status=401, mimetype='text/plain')
-        
+
         user_id = user['id']
-    
+        tab_id = request.args.get('tabId')  # Get tabId from query param
+
     def generate():
-        queue = sse_manager.subscribe(user_id)
+        client = sse_manager.subscribe(user_id, tab_id)
         try:
             # Send initial connection event
-            yield f"event: connected\ndata: {json.dumps({'status': 'connected', 'user_id': user_id})}\n\n"
-            
+            yield f"event: connected\ndata: {json.dumps({'status': 'connected', 'user_id': user_id, 'tabId': tab_id})}\n\n"
+
             # Stream events
             while True:
-                if queue:
-                    message = queue.pop(0)
+                if client['queue']:
+                    message = client['queue'].pop(0)
                     yield message
                 else:
                     # Wait for new events
                     import time
                     time.sleep(0.5)
         finally:
-            sse_manager.unsubscribe(user_id, queue)
+            sse_manager.unsubscribe(user_id, client)
     
     return Response(
         generate(),
@@ -450,13 +452,16 @@ def api_create_task(conn, user_id):
     conn.execute('UPDATE user_progress SET xp=?, level=?, xp_max=? WHERE user_id=?',
                  (new_xp, new_level, new_xp_max, user_id))
     conn.commit()
+
+    # Get tabId from header for multi-tab support
+    source_tab_id = request.headers.get('X-Tab-ID')
     
     # Send SSE event
     send_user_event(user_id, 'task_created', {
         'id': task_id, 'text': data['text'].strip(), 'xp': xp,
         'xpEarned': 3, 'level': new_level, 'currentXp': new_xp, 'xpMax': new_xp_max, 'leveledUp': leveled_up
-    })
-    
+    }, source_tab_id)
+
     return jsonify({
         'id': task_id, 'text': data['text'].strip(), 'xp': xp,
         'xpEarned': 3, 'level': new_level, 'currentXp': new_xp, 'xpMax': new_xp_max, 'leveledUp': leveled_up
@@ -471,10 +476,13 @@ def api_update_task(conn, user_id, task_id):
         return jsonify({'error': 'Текст задачи обязателен'}), 400
     conn.execute('UPDATE tasks SET text = ? WHERE id = ? AND user_id = ?', (data['text'].strip(), task_id, user_id))
     conn.commit()
+
+    # Get tabId from header for multi-tab support
+    source_tab_id = request.headers.get('X-Tab-ID')
     
     # Send SSE event
-    send_user_event(user_id, 'task_updated', {'id': task_id, 'text': data['text'].strip()})
-    
+    send_user_event(user_id, 'task_updated', {'id': task_id, 'text': data['text'].strip()}, source_tab_id)
+
     return jsonify({'success': True})
 
 @app.route('/api/tasks/<task_id>', methods=['DELETE'])
@@ -483,10 +491,13 @@ def api_update_task(conn, user_id, task_id):
 def api_delete_task(conn, user_id, task_id):
     conn.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id))
     conn.commit()
+
+    # Get tabId from header for multi-tab support
+    source_tab_id = request.headers.get('X-Tab-ID')
     
     # Send SSE event
-    send_user_event(user_id, 'task_deleted', {'id': task_id})
-    
+    send_user_event(user_id, 'task_deleted', {'id': task_id}, source_tab_id)
+
     return jsonify({'success': True})
 
 @app.route('/api/tasks/<task_id>/complete', methods=['POST'])
@@ -542,6 +553,9 @@ def api_complete_task(conn, user_id, task_id):
 
     conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
     conn.commit()
+
+    # Get tabId from header for multi-tab support
+    source_tab_id = request.headers.get('X-Tab-ID')
     
     # Send SSE event
     send_user_event(user_id, 'task_completed', {
@@ -555,7 +569,7 @@ def api_complete_task(conn, user_id, task_id):
         'combo': combo,
         'leveledUp': leveled_up,
         'newAchievements': new_achievements
-    })
+    }, source_tab_id)
 
     return jsonify({
         'success': True, 'xpEarned': xp_earned, 'level': new_level, 'xp': new_xp, 'xpMax': new_xp_max,

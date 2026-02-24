@@ -29,7 +29,7 @@ python server.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.24 - gunicorn for automatic code reloading"
+git commit -m "v0.0.25 - multi-tab support with unique tab IDs for SSE connections"
 git push
 python server.py
 
@@ -58,3 +58,4 @@ v0.0.21 - webhook auto-deploy + all-in-one start scripts
 v0.0.22 - graceful reload (zero downtime deploys)
 v0.0.23 - Add SSE events for real-time task updates
 v0.0.24 - gunicorn for automatic code reloading
+v0.0.25 - multi-tab support with unique tab IDs for SSE connections
