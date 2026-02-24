@@ -28,7 +28,7 @@ python server.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.32 - server auto update test 6"
+git commit -m "v0.0.37 - websocket instead SSE"
 git push
 python server.py
 
@@ -59,9 +59,4 @@ v0.0.23 - Add SSE events for real-time task updates
 v0.0.24 - gunicorn for automatic code reloading
 v0.0.25 - multi-tab support with unique tab IDs for SSE connections
 v0.0.26 - Modify docker-compose.yml to mount Docker socket for Telegram bot
-v0.0.27 - server auto update test 1
-v0.0.28 - server auto update test 2
-v0.0.29 - server auto update test 3
-v0.0.30 - server auto update test 4
-v0.0.31 - server auto update test 5
-v0.0.32 - server auto update test 6
+v0.0.27 - websocket instead SSE

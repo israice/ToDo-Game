@@ -19,11 +19,11 @@ let state = {
 let comboTimer = null;
 let audioCtx = null;
 
-// Generate unique tab ID for multi-tab support
-const TAB_ID = 'tab_' + Math.random().toString(36).substr(2, 9);
+// Generate unique session ID for WebSocket
+const SESSION_ID = 'sess_' + Math.random().toString(36).substr(2, 9);
 
-// SSE connection
-let eventSource = null;
+// WebSocket connection
+let socket = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 const RECONNECT_DELAY_MS = 3000;
@@ -79,7 +79,6 @@ async function api(url, options = {}) {
   const response = await fetch(url, {
     headers: {
       'Content-Type': 'application/json',
-      'X-Tab-ID': TAB_ID,  // Send tab ID for multi-tab support
       ...options.headers
     },
     ...options
@@ -130,31 +129,39 @@ function showRefreshIndicator() {
   }, 1000);
 }
 
-// ========== SSE (Server-Sent Events) ==========
+// ========== WebSocket (Socket.IO) ==========
 
-function connectSSE() {
-  if (eventSource) {
-    eventSource.close();
+function connectWebSocket() {
+  if (socket) {
+    socket.disconnect();
   }
 
-  // Connect with tabId for multi-tab support
-  eventSource = new EventSource(`/api/events?tabId=${TAB_ID}`);
+  // Connect to Socket.IO server
+  socket = io({
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionDelay: RECONNECT_DELAY_MS,
+    reconnectionDelayMax: 10000,
+    reconnectionAttempts: MAX_RECONNECT_ATTEMPTS
+  });
 
-  eventSource.addEventListener('connected', (e) => {
-    const data = JSON.parse(e.data);
-    console.log('✓ SSE connected:', data);
+  socket.on('connect', () => {
+    console.log('✓ WebSocket connected:', socket.id);
     reconnectAttempts = 0;
   });
 
-  eventSource.addEventListener('task_created', (e) => {
-    const data = JSON.parse(e.data);
-    console.log('📝 Task created (SSE):', data);
-    
+  socket.on('disconnect', (reason) => {
+    console.log('✗ WebSocket disconnected:', reason);
+  });
+
+  socket.on('task_created', (data) => {
+    console.log('📝 Task created (WS):', data);
+
     // Check if this is from another tab/window
     const existingTask = state.tasks.find(t => t.id === data.id);
     if (!existingTask) {
       state.tasks.unshift({ id: data.id, text: data.text, xp: data.xp });
-      
+
       // Update state if includes XP/level changes
       if (data.xpEarned) {
         state.level = data.level;
@@ -162,17 +169,16 @@ function connectSSE() {
         state.xpMax = data.xpMax;
         if (data.leveledUp) showPopup('levelup');
       }
-      
+
       renderTasks();
       updateUI();
       playSound('add');
     }
   });
 
-  eventSource.addEventListener('task_updated', (e) => {
-    const data = JSON.parse(e.data);
-    console.log('✏️ Task updated (SSE):', data);
-    
+  socket.on('task_updated', (data) => {
+    console.log('✏️ Task updated (WS):', data);
+
     const task = state.tasks.find(t => t.id === data.id);
     if (task) {
       task.text = data.text;
@@ -180,10 +186,9 @@ function connectSSE() {
     }
   });
 
-  eventSource.addEventListener('task_deleted', (e) => {
-    const data = JSON.parse(e.data);
-    console.log('🗑️ Task deleted (SSE):', data);
-    
+  socket.on('task_deleted', (data) => {
+    console.log('🗑️ Task deleted (WS):', data);
+
     const taskIndex = state.tasks.findIndex(t => t.id === data.id);
     if (taskIndex !== -1) {
       state.tasks.splice(taskIndex, 1);
@@ -191,16 +196,15 @@ function connectSSE() {
     }
   });
 
-  eventSource.addEventListener('task_completed', (e) => {
-    const data = JSON.parse(e.data);
-    console.log('✅ Task completed (SSE):', data);
-    
+  socket.on('task_completed', (data) => {
+    console.log('✅ Task completed (WS):', data);
+
     // Remove task from list
     const taskIndex = state.tasks.findIndex(t => t.id === data.id);
     if (taskIndex !== -1) {
       state.tasks.splice(taskIndex, 1);
     }
-    
+
     // Update state
     state.level = data.level;
     state.xp = data.xp;
@@ -208,7 +212,7 @@ function connectSSE() {
     state.completed = data.completed;
     state.streak = data.streak;
     state.combo = data.combo;
-    
+
     // Handle achievements
     if (data.newAchievements && data.newAchievements.length > 0) {
       data.newAchievements.forEach((achId, i) => {
@@ -219,32 +223,29 @@ function connectSSE() {
       });
       renderAchievements();
     }
-    
+
     // Handle level up
     if (data.leveledUp) showPopup('levelup');
-    
+
     if (state.combo > 1) playSound('combo');
-    
+
     renderTasks();
     updateUI();
   });
 
-  eventSource.onerror = (err) => {
-    console.error('❌ SSE error:', err);
-    eventSource.close();
-    
-    // Reconnect with exponential backoff
-    if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-      reconnectAttempts++;
-      const delay = RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempts - 1);
-      console.log(`🔄 Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
-      setTimeout(connectSSE, delay);
-    } else {
-      console.error('❌ Max reconnection attempts reached');
-    }
-  };
+  socket.on('connect_error', (err) => {
+    console.error('❌ WebSocket connection error:', err);
+  });
 
-  console.log('📡 Connecting to SSE...');
+  socket.on('reconnect_attempt', (attempt) => {
+    console.log(`🔄 Reconnecting (attempt ${attempt}/${MAX_RECONNECT_ATTEMPTS})`);
+  });
+
+  socket.on('reconnect_failed', () => {
+    console.error('❌ Max reconnection attempts reached');
+  });
+
+  console.log('📡 Connecting to WebSocket...');
 }
 
 // ========== SOUND ==========
@@ -1251,8 +1252,8 @@ loadHistory();
 // Load state from server
 loadState().then(() => {
   $('task-input').focus();
-  // Connect to SSE after initial load
-  connectSSE();
+  // Connect to WebSocket after initial load
+  connectWebSocket();
 });
 
 // ========== AUTO-REFRESH ==========

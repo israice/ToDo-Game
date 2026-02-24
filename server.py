@@ -1,4 +1,5 @@
 import os, math, uuid, random, hashlib, hmac, subprocess, sqlite3, logging, json
+import warnings
 from datetime import datetime, date
 from functools import wraps
 from contextlib import contextmanager
@@ -8,6 +9,11 @@ from dotenv import load_dotenv
 import bcrypt
 from flask_wtf.csrf import CSRFProtect
 from threading import Lock
+from flask_socketio import SocketIO, emit, join_room, leave_room
+
+# Suppress all dependency warnings
+warnings.filterwarnings('ignore')
+os.environ['PYTHONWARNINGS'] = 'ignore'
 
 load_dotenv()
 
@@ -21,6 +27,9 @@ app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.secret_key = os.environ.get('SECRET_KEY') or (_ for _ in ()).throw(RuntimeError("SECRET_KEY required"))
 csrf = CSRFProtect(app)
+
+# Initialize Socket.IO
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 BRANCH = os.environ.get("BRANCH", "master")
@@ -50,62 +59,79 @@ def no_cache(response):
     response.headers['Cache-Control'] = 'no-store'
     return response
 
-# ============== SSE Event Manager ==============
+# ============== WebSocket Event Manager ==============
 
-class SSEManager:
+class WebSocketManager:
     def __init__(self):
-        self.clients = {}  # user_id -> list of {queue, tab_id}
-        self.lock = Lock()
+        self.user_sessions = {}  # user_id -> set of session_ids
 
-    def subscribe(self, user_id, tab_id=None):
-        """Add client subscription for user"""
-        with self.lock:
-            if user_id not in self.clients:
-                self.clients[user_id] = []
-            client = {'queue': [], 'tab_id': tab_id}
-            self.clients[user_id].append(client)
-            return client
+    def add_session(self, user_id, session_id):
+        """Add user session"""
+        if user_id not in self.user_sessions:
+            self.user_sessions[user_id] = set()
+        self.user_sessions[user_id].add(session_id)
 
-    def unsubscribe(self, user_id, client):
-        """Remove client subscription"""
-        with self.lock:
-            if user_id in self.clients:
-                try:
-                    self.clients[user_id].remove(client)
-                except ValueError:
-                    pass
-                if not self.clients[user_id]:
-                    del self.clients[user_id]
+    def remove_session(self, user_id, session_id):
+        """Remove user session"""
+        if user_id in self.user_sessions:
+            self.user_sessions[user_id].discard(session_id)
+            if not self.user_sessions[user_id]:
+                del self.user_sessions[user_id]
 
-    def broadcast(self, user_id, event_type, data, source_tab_id=None):
-        """Send event to all clients of user except source tab"""
-        with self.lock:
-            if user_id not in self.clients:
-                return
+    def broadcast(self, user_id, event_type, data, source_session_id=None):
+        """Send event to all user sessions except source"""
+        if user_id not in self.user_sessions:
+            return
+        for session_id in self.user_sessions[user_id]:
+            if session_id == source_session_id:
+                continue
+            socketio.emit(event_type, data, to=session_id)
 
-            dead_clients = []
-            for client in self.clients[user_id]:
-                # Skip the tab that originated the event
-                if source_tab_id and client['tab_id'] == source_tab_id:
-                    continue
-                try:
-                    client['queue'].append(f"event: {event_type}\ndata: {json.dumps(data)}\n\n")
-                except:
-                    dead_clients.append(client)
+# Global WebSocket manager
+ws_manager = WebSocketManager()
 
-            # Clean up dead clients
-            for dc in dead_clients:
-                try:
-                    self.clients[user_id].remove(dc)
-                except:
-                    pass
+def send_user_event(user_id, event_type, data, source_session_id=None):
+    """Helper to send event to all user sessions except source"""
+    ws_manager.broadcast(user_id, event_type, data, source_session_id)
 
-# Global SSE manager
-sse_manager = SSEManager()
+# ============== WebSocket Event Handlers ==============
 
-def send_user_event(user_id, event_type, data, source_tab_id=None):
-    """Helper to send event to all user clients except source tab"""
-    sse_manager.broadcast(user_id, event_type, data, source_tab_id)
+@socketio.on('connect')
+def handle_connect():
+    """Handle WebSocket connection"""
+    if 'user' not in session:
+        return False
+    
+    with get_db() as conn:
+        user = conn.execute('SELECT id FROM users WHERE username = ?', (session['user'],)).fetchone()
+        if not user:
+            return False
+        
+        user_id = user['id']
+        session_id = request.sid
+        
+        # Join user-specific room
+        join_room(f'user_{user_id}')
+        ws_manager.add_session(user_id, session_id)
+        
+        print(f'✓ WebSocket connected: user_{user_id} session {session_id}')
+        emit('connected', {'status': 'connected', 'user_id': user_id, 'sessionId': session_id})
+        return True
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle WebSocket disconnection"""
+    if 'user' not in session:
+        return
+    
+    with get_db() as conn:
+        user = conn.execute('SELECT id FROM users WHERE username = ?', (session['user'],)).fetchone()
+        if user:
+            user_id = user['id']
+            session_id = request.sid
+            leave_room(f'user_{user_id}')
+            ws_manager.remove_session(user_id, session_id)
+            print(f'✗ WebSocket disconnected: user_{user_id} session {session_id}')
 
 # ============== DB Helpers ==============
 
@@ -273,50 +299,6 @@ def logout():
     session.pop('user', None)
     return redirect('/')
 
-# ============== SSE Endpoint ==============
-
-@app.route('/api/events')
-def api_events():
-    """Server-Sent Events endpoint for real-time updates"""
-    if 'user' not in session:
-        return Response('Unauthorized\n', status=401, mimetype='text/plain')
-
-    with get_db() as conn:
-        user = conn.execute('SELECT id FROM users WHERE username = ?', (session['user'],)).fetchone()
-        if not user:
-            return Response('Unauthorized\n', status=401, mimetype='text/plain')
-
-        user_id = user['id']
-        tab_id = request.args.get('tabId')  # Get tabId from query param
-
-    def generate():
-        client = sse_manager.subscribe(user_id, tab_id)
-        try:
-            # Send initial connection event
-            yield f"event: connected\ndata: {json.dumps({'status': 'connected', 'user_id': user_id, 'tabId': tab_id})}\n\n"
-
-            # Stream events
-            while True:
-                if client['queue']:
-                    message = client['queue'].pop(0)
-                    yield message
-                else:
-                    # Wait for new events
-                    import time
-                    time.sleep(0.5)
-        finally:
-            sse_manager.unsubscribe(user_id, client)
-    
-    return Response(
-        generate(),
-        mimetype='text/event-stream',
-        headers={
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no'  # Disable nginx buffering if applicable
-        }
-    )
-
 # ============== API Auth Routes (for Telegram bot) ==============
 
 @app.route('/api/auth/login', methods=['POST'])
@@ -453,14 +435,11 @@ def api_create_task(conn, user_id):
                  (new_xp, new_level, new_xp_max, user_id))
     conn.commit()
 
-    # Get tabId from header for multi-tab support
-    source_tab_id = request.headers.get('X-Tab-ID')
-    
-    # Send SSE event
+    # Send WebSocket event to other tabs (source tab gets response directly)
     send_user_event(user_id, 'task_created', {
         'id': task_id, 'text': data['text'].strip(), 'xp': xp,
         'xpEarned': 3, 'level': new_level, 'currentXp': new_xp, 'xpMax': new_xp_max, 'leveledUp': leveled_up
-    }, source_tab_id)
+    })
 
     return jsonify({
         'id': task_id, 'text': data['text'].strip(), 'xp': xp,
@@ -477,11 +456,8 @@ def api_update_task(conn, user_id, task_id):
     conn.execute('UPDATE tasks SET text = ? WHERE id = ? AND user_id = ?', (data['text'].strip(), task_id, user_id))
     conn.commit()
 
-    # Get tabId from header for multi-tab support
-    source_tab_id = request.headers.get('X-Tab-ID')
-    
-    # Send SSE event
-    send_user_event(user_id, 'task_updated', {'id': task_id, 'text': data['text'].strip()}, source_tab_id)
+    # Send WebSocket event to other tabs
+    send_user_event(user_id, 'task_updated', {'id': task_id, 'text': data['text'].strip()})
 
     return jsonify({'success': True})
 
@@ -492,11 +468,8 @@ def api_delete_task(conn, user_id, task_id):
     conn.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id))
     conn.commit()
 
-    # Get tabId from header for multi-tab support
-    source_tab_id = request.headers.get('X-Tab-ID')
-    
-    # Send SSE event
-    send_user_event(user_id, 'task_deleted', {'id': task_id}, source_tab_id)
+    # Send WebSocket event to other tabs
+    send_user_event(user_id, 'task_deleted', {'id': task_id})
 
     return jsonify({'success': True})
 
@@ -554,10 +527,7 @@ def api_complete_task(conn, user_id, task_id):
     conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
     conn.commit()
 
-    # Get tabId from header for multi-tab support
-    source_tab_id = request.headers.get('X-Tab-ID')
-    
-    # Send SSE event
+    # Send WebSocket event to other tabs
     send_user_event(user_id, 'task_completed', {
         'id': task_id,
         'xpEarned': xp_earned,
@@ -569,7 +539,7 @@ def api_complete_task(conn, user_id, task_id):
         'combo': combo,
         'leveledUp': leveled_up,
         'newAchievements': new_achievements
-    }, source_tab_id)
+    })
 
     return jsonify({
         'success': True, 'xpEarned': xp_earned, 'level': new_level, 'xp': new_xp, 'xpMax': new_xp_max,
