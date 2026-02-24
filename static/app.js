@@ -19,6 +19,12 @@ let state = {
 let comboTimer = null;
 let audioCtx = null;
 
+// SSE connection
+let eventSource = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+const RECONNECT_DELAY_MS = 3000;
+
 // Media popup state
 let currentMediaTaskId = null;
 let cameraStream = null;
@@ -90,6 +96,147 @@ async function loadState() {
   }
   // Hide skeleton loader
   $('skeleton-loader')?.classList.add('hidden');
+  
+  // Show brief refresh indicator
+  showRefreshIndicator();
+}
+
+let refreshIndicatorTimeout = null;
+function showRefreshIndicator() {
+  // Create indicator if it doesn't exist
+  let indicator = $('refresh-indicator');
+  if (!indicator) {
+    indicator = document.createElement('div');
+    indicator.id = 'refresh-indicator';
+    indicator.innerHTML = '🔄';
+    indicator.style.cssText = 'position:fixed;top:10px;right:10px;font-size:24px;opacity:0;transition:opacity 0.3s;z-index:9999;';
+    document.body.appendChild(indicator);
+  }
+  
+  // Show indicator
+  indicator.style.opacity = '1';
+
+  // Hide after 1 second
+  if (refreshIndicatorTimeout) clearTimeout(refreshIndicatorTimeout);
+  refreshIndicatorTimeout = setTimeout(() => {
+    indicator.style.opacity = '0';
+  }, 1000);
+}
+
+// ========== SSE (Server-Sent Events) ==========
+
+function connectSSE() {
+  if (eventSource) {
+    eventSource.close();
+  }
+
+  eventSource = new EventSource('/api/events');
+
+  eventSource.addEventListener('connected', (e) => {
+    const data = JSON.parse(e.data);
+    console.log('✓ SSE connected:', data);
+    reconnectAttempts = 0;
+  });
+
+  eventSource.addEventListener('task_created', (e) => {
+    const data = JSON.parse(e.data);
+    console.log('📝 Task created (SSE):', data);
+    
+    // Check if this is from another tab/window
+    const existingTask = state.tasks.find(t => t.id === data.id);
+    if (!existingTask) {
+      state.tasks.unshift({ id: data.id, text: data.text, xp: data.xp });
+      
+      // Update state if includes XP/level changes
+      if (data.xpEarned) {
+        state.level = data.level;
+        state.xp = data.currentXp;
+        state.xpMax = data.xpMax;
+        if (data.leveledUp) showPopup('levelup');
+      }
+      
+      renderTasks();
+      updateUI();
+      playSound('add');
+    }
+  });
+
+  eventSource.addEventListener('task_updated', (e) => {
+    const data = JSON.parse(e.data);
+    console.log('✏️ Task updated (SSE):', data);
+    
+    const task = state.tasks.find(t => t.id === data.id);
+    if (task) {
+      task.text = data.text;
+      renderTasks();
+    }
+  });
+
+  eventSource.addEventListener('task_deleted', (e) => {
+    const data = JSON.parse(e.data);
+    console.log('🗑️ Task deleted (SSE):', data);
+    
+    const taskIndex = state.tasks.findIndex(t => t.id === data.id);
+    if (taskIndex !== -1) {
+      state.tasks.splice(taskIndex, 1);
+      renderTasks();
+    }
+  });
+
+  eventSource.addEventListener('task_completed', (e) => {
+    const data = JSON.parse(e.data);
+    console.log('✅ Task completed (SSE):', data);
+    
+    // Remove task from list
+    const taskIndex = state.tasks.findIndex(t => t.id === data.id);
+    if (taskIndex !== -1) {
+      state.tasks.splice(taskIndex, 1);
+    }
+    
+    // Update state
+    state.level = data.level;
+    state.xp = data.xp;
+    state.xpMax = data.xpMax;
+    state.completed = data.completed;
+    state.streak = data.streak;
+    state.combo = data.combo;
+    
+    // Handle achievements
+    if (data.newAchievements && data.newAchievements.length > 0) {
+      data.newAchievements.forEach((achId, i) => {
+        state.achievements[achId] = true;
+        const ach = ACHIEVEMENTS.find(a => a.id === achId);
+        if (ach) addToHistory(ach.name, 100, ach.icon);
+        setTimeout(() => showPopup('achievement', achId), i * 500);
+      });
+      renderAchievements();
+    }
+    
+    // Handle level up
+    if (data.leveledUp) showPopup('levelup');
+    
+    if (state.combo > 1) playSound('combo');
+    
+    renderTasks();
+    updateUI();
+  });
+
+  eventSource.onerror = (err) => {
+    console.error('❌ SSE error:', err);
+    eventSource.close();
+    
+    // Reconnect with exponential backoff
+    if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+      reconnectAttempts++;
+      const delay = RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempts - 1);
+      console.log(`🔄 Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+      setTimeout(connectSSE, delay);
+    } else {
+      console.error('❌ Max reconnection attempts reached');
+    }
+  };
+
+  console.log('📡 Connecting to SSE...');
 }
 
 // ========== SOUND ==========
@@ -1096,4 +1243,48 @@ loadHistory();
 // Load state from server
 loadState().then(() => {
   $('task-input').focus();
+  // Connect to SSE after initial load
+  connectSSE();
+});
+
+// ========== AUTO-REFRESH ==========
+
+// Refresh state when tab becomes visible (user returns to tab)
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    console.log('Tab visible - refreshing data...');
+    loadState();
+  }
+});
+
+// Refresh state when window regains focus
+window.addEventListener('focus', () => {
+  console.log('Window focused - refreshing data...');
+  loadState();
+});
+
+// Periodic background refresh (every 60 seconds)
+// Only used as fallback when SSE is not available
+let refreshTimer = null;
+function startAutoRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(() => {
+    // Only refresh if tab is visible and SSE is not connected
+    if (!document.hidden && !eventSource) {
+      console.log('Auto-refreshing data (SSE not available)...');
+      loadState();
+    }
+  }, 60000); // 60 seconds
+}
+
+// Start auto-refresh
+startAutoRefresh();
+
+// Stop auto-refresh and SSE on page unload
+window.addEventListener('beforeunload', () => {
+  if (refreshTimer) clearInterval(refreshTimer);
+  if (eventSource) {
+    eventSource.close();
+    console.log('SSE connection closed');
+  }
 });

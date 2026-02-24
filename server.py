@@ -1,12 +1,13 @@
-import os, math, uuid, random, hashlib, hmac, subprocess, sqlite3, logging
+import os, math, uuid, random, hashlib, hmac, subprocess, sqlite3, logging, json
 from datetime import datetime, date
 from functools import wraps
 from contextlib import contextmanager
-from flask import Flask, request, redirect, session, render_template, jsonify, send_from_directory
+from flask import Flask, request, redirect, session, render_template, jsonify, send_from_directory, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 import bcrypt
 from flask_wtf.csrf import CSRFProtect
+from threading import Lock
 
 load_dotenv()
 
@@ -48,6 +49,62 @@ ACHIEVEMENTS = [
 def no_cache(response):
     response.headers['Cache-Control'] = 'no-store'
     return response
+
+# ============== SSE Event Manager ==============
+
+class SSEManager:
+    def __init__(self):
+        self.clients = {}  # user_id -> list of queues
+        self.lock = Lock()
+    
+    def subscribe(self, user_id):
+        """Add client subscription for user"""
+        with self.lock:
+            if user_id not in self.clients:
+                self.clients[user_id] = []
+            queue = []
+            self.clients[user_id].append(queue)
+            return queue
+    
+    def unsubscribe(self, user_id, queue):
+        """Remove client subscription"""
+        with self.lock:
+            if user_id in self.clients:
+                try:
+                    self.clients[user_id].remove(queue)
+                except ValueError:
+                    pass
+                if not self.clients[user_id]:
+                    del self.clients[user_id]
+    
+    def broadcast(self, user_id, event_type, data):
+        """Send event to all clients of user"""
+        with self.lock:
+            if user_id not in self.clients:
+                return
+            
+            message = f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+            
+            dead_queues = []
+            for queue in self.clients[user_id]:
+                try:
+                    queue.append(message)
+                except:
+                    dead_queues.append(queue)
+            
+            # Clean up dead queues
+            for dq in dead_queues:
+                try:
+                    self.clients[user_id].remove(dq)
+                except:
+                    pass
+
+# Global SSE manager
+sse_manager = SSEManager()
+
+def send_user_event(user_id, event_type, data):
+    """Helper to send event to all user clients"""
+    sse_manager.broadcast(user_id, event_type, data)
 
 # ============== DB Helpers ==============
 
@@ -102,6 +159,11 @@ def init_db():
                 FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
                 UNIQUE(task_id));
+            CREATE TABLE IF NOT EXISTS api_tokens (
+                id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, token TEXT UNIQUE NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE);
+            CREATE INDEX IF NOT EXISTS idx_api_tokens ON api_tokens(token);
         ''')
 
 def with_db(f):
@@ -116,6 +178,27 @@ def with_db(f):
                 session.pop('user', None)
                 return jsonify({'error': 'Не авторизован'}), 401
             return f(conn, user['id'], *args, **kwargs)
+    return decorated
+
+def with_token_auth(f):
+    """Decorator: token-based auth for API (Telegram bot)"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        data = request.get_json() or {}
+        token = data.get('token')
+        
+        if not token:
+            return jsonify({'error': 'Token required'}), 401
+        
+        with get_db() as conn:
+            token_data = conn.execute('''
+                SELECT user_id FROM api_tokens WHERE token = ?
+            ''', (token,)).fetchone()
+            
+            if not token_data:
+                return jsonify({'error': 'Invalid or expired token'}), 401
+            
+            return f(conn, token_data['user_id'], *args, **kwargs)
     return decorated
 
 def get_or_create_progress(conn, user_id):
@@ -189,6 +272,138 @@ def logout():
     session.pop('user', None)
     return redirect('/')
 
+# ============== SSE Endpoint ==============
+
+@app.route('/api/events')
+def api_events():
+    """Server-Sent Events endpoint for real-time updates"""
+    if 'user' not in session:
+        return Response('Unauthorized\n', status=401, mimetype='text/plain')
+    
+    with get_db() as conn:
+        user = conn.execute('SELECT id FROM users WHERE username = ?', (session['user'],)).fetchone()
+        if not user:
+            return Response('Unauthorized\n', status=401, mimetype='text/plain')
+        
+        user_id = user['id']
+    
+    def generate():
+        queue = sse_manager.subscribe(user_id)
+        try:
+            # Send initial connection event
+            yield f"event: connected\ndata: {json.dumps({'status': 'connected', 'user_id': user_id})}\n\n"
+            
+            # Stream events
+            while True:
+                if queue:
+                    message = queue.pop(0)
+                    yield message
+                else:
+                    # Wait for new events
+                    import time
+                    time.sleep(0.5)
+        finally:
+            sse_manager.unsubscribe(user_id, queue)
+    
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'  # Disable nginx buffering if applicable
+        }
+    )
+
+# ============== API Auth Routes (for Telegram bot) ==============
+
+@app.route('/api/auth/login', methods=['POST'])
+@csrf.exempt
+def api_login():
+    """API login for Telegram bot - returns session token"""
+    data = request.get_json() or {}
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
+    
+    if not username or not password:
+        return jsonify({'success': False, 'error': 'Username and password required'}), 400
+    
+    with get_db() as conn:
+        user = conn.execute('SELECT * FROM users WHERE username=?', (username,)).fetchone()
+        if not user:
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+        
+        if not bcrypt.checkpw(password.encode(), user['password'].encode()):
+            return jsonify({'success': False, 'error': 'Invalid password'}), 401
+        
+        # Generate session token
+        session_token = hashlib.sha256(f"{user['id']}-{username}-{os.urandom(16).hex()}".encode()).hexdigest()
+        
+        # Store token in a simple tokens table
+        conn.execute('''INSERT INTO api_tokens (user_id, token, created_at) 
+                        VALUES (?, ?, datetime('now'))''', (user['id'], session_token))
+        conn.commit()
+        
+        return jsonify({
+            'success': True,
+            'token': session_token,
+            'username': username,
+            'user_id': user['id']
+        })
+
+@app.route('/api/auth/register', methods=['POST'])
+@csrf.exempt
+def api_register():
+    """API registration for Telegram bot"""
+    data = request.get_json() or {}
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
+    
+    if not username or not password:
+        return jsonify({'success': False, 'error': 'Username and password required'}), 400
+    
+    if len(username) < 3:
+        return jsonify({'success': False, 'error': 'Username must be at least 3 characters'}), 400
+    
+    if len(password) < 4:
+        return jsonify({'success': False, 'error': 'Password must be at least 4 characters'}), 400
+    
+    with get_db() as conn:
+        try:
+            pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+            cursor = conn.execute('INSERT INTO users (username, password) VALUES (?, ?)',
+                                  (username, pw_hash))
+            conn.execute('INSERT INTO user_progress (user_id) VALUES (?)', (cursor.lastrowid,))
+            conn.commit()
+            
+            # Generate session token
+            session_token = hashlib.sha256(f"{cursor.lastrowid}-{username}-{os.urandom(16).hex()}".encode()).hexdigest()
+            conn.execute('''INSERT INTO api_tokens (user_id, token, created_at) 
+                            VALUES (?, ?, datetime('now'))''', (cursor.lastrowid, session_token))
+            conn.commit()
+            
+            return jsonify({
+                'success': True,
+                'token': session_token,
+                'username': username,
+                'user_id': cursor.lastrowid
+            })
+        except sqlite3.IntegrityError:
+            return jsonify({'success': False, 'error': 'Username already exists', 'alreadyExists': True}), 409
+
+@app.route('/api/auth/logout', methods=['POST'])
+@csrf.exempt
+def api_logout():
+    """Invalidate session token"""
+    data = request.get_json() or {}
+    token = data.get('token', '')
+    
+    with get_db() as conn:
+        conn.execute('DELETE FROM api_tokens WHERE token = ?', (token,))
+        conn.commit()
+    
+    return jsonify({'success': True})
+
 # ============== API Routes ==============
 
 @app.route('/api/state')
@@ -235,6 +450,13 @@ def api_create_task(conn, user_id):
     conn.execute('UPDATE user_progress SET xp=?, level=?, xp_max=? WHERE user_id=?',
                  (new_xp, new_level, new_xp_max, user_id))
     conn.commit()
+    
+    # Send SSE event
+    send_user_event(user_id, 'task_created', {
+        'id': task_id, 'text': data['text'].strip(), 'xp': xp,
+        'xpEarned': 3, 'level': new_level, 'currentXp': new_xp, 'xpMax': new_xp_max, 'leveledUp': leveled_up
+    })
+    
     return jsonify({
         'id': task_id, 'text': data['text'].strip(), 'xp': xp,
         'xpEarned': 3, 'level': new_level, 'currentXp': new_xp, 'xpMax': new_xp_max, 'leveledUp': leveled_up
@@ -249,6 +471,10 @@ def api_update_task(conn, user_id, task_id):
         return jsonify({'error': 'Текст задачи обязателен'}), 400
     conn.execute('UPDATE tasks SET text = ? WHERE id = ? AND user_id = ?', (data['text'].strip(), task_id, user_id))
     conn.commit()
+    
+    # Send SSE event
+    send_user_event(user_id, 'task_updated', {'id': task_id, 'text': data['text'].strip()})
+    
     return jsonify({'success': True})
 
 @app.route('/api/tasks/<task_id>', methods=['DELETE'])
@@ -257,6 +483,10 @@ def api_update_task(conn, user_id, task_id):
 def api_delete_task(conn, user_id, task_id):
     conn.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id))
     conn.commit()
+    
+    # Send SSE event
+    send_user_event(user_id, 'task_deleted', {'id': task_id})
+    
     return jsonify({'success': True})
 
 @app.route('/api/tasks/<task_id>/complete', methods=['POST'])
@@ -312,6 +542,20 @@ def api_complete_task(conn, user_id, task_id):
 
     conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
     conn.commit()
+    
+    # Send SSE event
+    send_user_event(user_id, 'task_completed', {
+        'id': task_id,
+        'xpEarned': xp_earned,
+        'level': new_level,
+        'xp': new_xp,
+        'xpMax': new_xp_max,
+        'completed': new_completed,
+        'streak': new_streak,
+        'combo': combo,
+        'leveledUp': leveled_up,
+        'newAchievements': new_achievements
+    })
 
     return jsonify({
         'success': True, 'xpEarned': xp_earned, 'level': new_level, 'xp': new_xp, 'xpMax': new_xp_max,
@@ -325,6 +569,117 @@ def api_complete_task(conn, user_id, task_id):
 def api_reset_combo(conn, user_id):
     conn.execute('UPDATE user_progress SET combo = 0 WHERE user_id = ?', (user_id,))
     conn.commit()
+    return jsonify({'success': True})
+
+# ============== Telegram Bot API (Token-based) ==============
+
+@app.route('/api/bot/tasks', methods=['GET'])
+@csrf.exempt
+@with_token_auth
+def bot_get_tasks(conn, user_id):
+    """Get simple list of tasks for Telegram bot"""
+    tasks = conn.execute(
+        'SELECT id, text, xp_reward FROM tasks WHERE user_id = ? ORDER BY created_at DESC',
+        (user_id,)
+    ).fetchall()
+    return jsonify({
+        'success': True,
+        'tasks': [{'id': t['id'], 'text': t['text'], 'xp': t['xp_reward']} for t in tasks]
+    })
+
+@app.route('/api/bot/tasks/add', methods=['POST'])
+@csrf.exempt
+@with_token_auth
+def bot_add_task(conn, user_id):
+    """Add task for Telegram bot"""
+    data = request.get_json() or {}
+    text = data.get('text', '').strip()
+    
+    if not text:
+        return jsonify({'success': False, 'error': 'Task text required'}), 400
+    
+    task_id = f"{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
+    xp = random.randint(20, 35)
+    
+    conn.execute('INSERT INTO tasks (id, user_id, text, xp_reward) VALUES (?, ?, ?, ?)',
+                 (task_id, user_id, text, xp))
+    
+    # +3 XP for creating task
+    progress = get_or_create_progress(conn, user_id)
+    new_xp, new_level, new_xp_max, leveled_up = apply_xp(progress, 3)
+    conn.execute('UPDATE user_progress SET xp=?, level=?, xp_max=? WHERE user_id=?',
+                 (new_xp, new_level, new_xp_max, user_id))
+    conn.commit()
+    
+    return jsonify({
+        'success': True,
+        'task': {'id': task_id, 'text': text, 'xp': xp},
+        'xpEarned': 3,
+        'level': new_level,
+        'leveledUp': leveled_up
+    })
+
+@app.route('/api/bot/tasks/<task_id>/complete', methods=['POST'])
+@csrf.exempt
+@with_token_auth
+def bot_complete_task(conn, user_id, task_id):
+    """Complete task for Telegram bot"""
+    task = conn.execute('SELECT * FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
+    if not task:
+        return jsonify({'success': False, 'error': 'Task not found'}), 404
+    
+    progress = get_or_create_progress(conn, user_id)
+    combo = progress['combo'] + 1
+    xp_earned = int(task['xp_reward'] * (1 + combo * 0.1))
+    
+    new_xp, new_level, new_xp_max, leveled_up = apply_xp(progress, xp_earned)
+    
+    today, last_date = date.today().isoformat(), progress['last_completion_date']
+    new_streak = progress['current_streak']
+    if last_date != today:
+        if last_date:
+            diff = (date.today() - date.fromisoformat(str(last_date))).days
+            new_streak = new_streak + 1 if diff == 1 else 1
+        else:
+            new_streak = 1
+    new_completed = progress['completed_tasks'] + 1
+    
+    conn.execute('''UPDATE user_progress SET level=?, xp=?, xp_max=?, completed_tasks=?,
+                    current_streak=?, combo=?, last_completion_date=? WHERE user_id=?''',
+                 (new_level, new_xp, new_xp_max, new_completed, new_streak, combo, today, user_id))
+    conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
+    conn.commit()
+    
+    return jsonify({
+        'success': True,
+        'xpEarned': xp_earned,
+        'level': new_level,
+        'leveledUp': leveled_up
+    })
+
+@app.route('/api/bot/tasks/<task_id>/delete', methods=['POST'])
+@csrf.exempt
+@with_token_auth
+def bot_delete_task(conn, user_id, task_id):
+    """Delete task for Telegram bot"""
+    conn.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id))
+    conn.commit()
+    return jsonify({'success': True})
+
+@app.route('/api/bot/tasks/<task_id>/rename', methods=['POST'])
+@csrf.exempt
+@with_token_auth
+def bot_rename_task(conn, user_id, task_id):
+    """Rename task for Telegram bot"""
+    data = request.get_json() or {}
+    text = data.get('text', '').strip()
+    
+    if not text:
+        return jsonify({'success': False, 'error': 'Task text required'}), 400
+    
+    conn.execute('UPDATE tasks SET text = ? WHERE id = ? AND user_id = ?', (text, task_id, user_id))
+    conn.commit()
+    
     return jsonify({'success': True})
 
 # ============== Media API ==============
@@ -627,13 +982,64 @@ def webhook():
     if payload.get("ref") != f"refs/heads/{BRANCH}":
         return "Ignored", 200
 
+    app.logger.info("🔄 Webhook received - starting update...")
+
+    # Git update
     for cmd in [["git", "fetch", "origin"], ["git", "reset", "--hard", f"origin/{BRANCH}"]]:
         result = subprocess.run(cmd, cwd="/app", capture_output=True, text=True)
         if result.returncode != 0:
             app.logger.error(f"{cmd[1]} failed: {result.stderr}")
             return f"Git {cmd[1]} failed", 500
 
-    subprocess.Popen(f"sleep 1 && kill -HUP {os.getppid()}", shell=True, start_new_session=True)
+    app.logger.info("✓ Code updated")
+
+    # Update requirements if changed
+    pip_cmd = ["pip", "install", "--no-cache-dir", "-r", "requirements.txt"]
+    result = subprocess.run(pip_cmd, cwd="/app", capture_output=True, text=True)
+    if result.returncode != 0:
+        app.logger.error(f"Pip install failed: {result.stderr}")
+    else:
+        app.logger.info("✓ Dependencies updated")
+
+    # Update telegram bot if exists
+    telegram_dir = os.path.join(os.path.dirname(__file__), 'telegram')
+    if os.path.exists(os.path.join(telegram_dir, 'package.json')):
+        app.logger.info("Updating Telegram bot...")
+        npm_cmd = ["npm", "install", "--production"]
+        result = subprocess.run(npm_cmd, cwd=telegram_dir, capture_output=True, text=True)
+        if result.returncode != 0:
+            app.logger.error(f"Npm install failed: {result.stderr}")
+        else:
+            app.logger.info("✓ Telegram bot updated")
+        
+        # Graceful restart of bot via signal
+        restart_script = os.path.join(telegram_dir, 'restart-bot.sh')
+        if os.path.exists(restart_script):
+            subprocess.Popen(["sh", restart_script], cwd=telegram_dir, 
+                           start_new_session=True, capture_output=True)
+            app.logger.info("✓ Telegram bot restart signal sent")
+
+    # Graceful reload via SIGHUP to Gunicorn master
+    # This reloads workers without dropping connections
+    import signal
+    parent_pid = os.getppid()
+    app.logger.info(f"🔄 Sending SIGHUP to Gunicorn master (PID: {parent_pid})")
+    
+    def send_hup():
+        import time
+        time.sleep(1)  # Let request complete
+        try:
+            os.kill(parent_pid, signal.SIGHUP)
+            app.logger.info("✓ Gunicorn reloaded")
+        except ProcessLookupError:
+            app.logger.error("Gunicorn master not found")
+        except PermissionError:
+            app.logger.error("Permission denied to send signal")
+    
+    # Send signal in background
+    subprocess.Popen(["python", "-c", f"import os, signal, time; time.sleep(1); os.kill({parent_pid}, signal.SIGHUP)"], 
+                     start_new_session=True, capture_output=True)
+    
     return "OK", 200
 
 # ============== Init ==============

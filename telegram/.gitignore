@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+
+# Auto-generated files
+telegram/telegram_text.js
+telegram/telegram_tasks.js
+
+# Temporary files
+temp/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db

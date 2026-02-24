@@ -1,20 +1,30 @@
 
-# RECOVERY
+# RUN
+┌──────────────────────┬───────────────────────────────────┐
+│ Сценарий             │ Способ                            │
+├──────────────────────┼───────────────────────────────────┤
+│ Личное использование │ python server.py                  │
+│ Разработка           │ ./start-all.sh (видны логи обоих) │
+│ Production сервер    │ docker-compose up -d              │
+│ Только веб без бота  │ python server.py                  │
+└──────────────────────┴───────────────────────────────────┘
 docker compose up -d --build
 
-
-git log --oneline -n 20
+# RECOVERY
+git log --oneline -n 5
 
 Copy-Item .env $env:TEMP\.env.backup
 git reset --hard 80f714fc
 git clean -fd
 Copy-Item $env:TEMP\.env.backup .env -Force
 git push origin master --force
+python server.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.17 - server test 1"
+git commit -m "v0.0.22 - graceful reload (zero downtime deploys)"
 git push
+python server.py
 
 # DEV LOG
 v0.0.1 - игравая база начало
@@ -34,3 +44,8 @@ v0.0.14 - добавлены табы и история достижений
 v0.0.15 - добавлина соц сеть
 v0.0.16 - добавлена поддержка фото и видео
 v0.0.17 - server test 1
+v0.0.18 - auto-refresh + telegram bot API (no browser!)
+v0.0.19 - SSE real-time updates (instant sync between devices)
+v0.0.20 - Telegram bot Docker support
+v0.0.21 - webhook auto-deploy + all-in-one start scripts
+v0.0.22 - graceful reload (zero downtime deploys)
