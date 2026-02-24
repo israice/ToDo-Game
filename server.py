@@ -1045,9 +1045,13 @@ def webhook():
     # Restart Telegram bot container (runs in separate Docker container)
     app.logger.info("🔄 Restarting Telegram bot container...")
     try:
+        # Set DOCKER_API_VERSION to match server
+        env = os.environ.copy()
+        env['DOCKER_API_VERSION'] = '1.44'
+        
         result = subprocess.run(
             ["docker", "restart", "todo-telegram-bot"],
-            capture_output=True, text=True, timeout=30
+            capture_output=True, text=True, timeout=30, env=env
         )
         if result.returncode == 0:
             app.logger.info("✓ Telegram bot container restarted")
@@ -1065,7 +1069,7 @@ def webhook():
     import signal
     parent_pid = os.getppid()
     app.logger.info(f"🔄 Sending SIGHUP to Gunicorn master (PID: {parent_pid})")
-    
+
     def send_hup():
         import time
         time.sleep(1)  # Let request complete
@@ -1076,11 +1080,15 @@ def webhook():
             app.logger.error("Gunicorn master not found")
         except PermissionError:
             app.logger.error("Permission denied to send signal")
-    
-    # Send signal in background
-    subprocess.Popen(["python", "-c", f"import os, signal, time; time.sleep(1); os.kill({parent_pid}, signal.SIGHUP)"], 
-                     start_new_session=True, capture_output=True)
-    
+
+    # Send signal in background (use stderr redirect instead of capture_output for Popen)
+    subprocess.Popen(
+        ["python", "-c", f"import os, signal, time; time.sleep(1); os.kill({parent_pid}, signal.SIGHUP)"],
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
     return "OK", 200
 
 # ============== Init ==============
