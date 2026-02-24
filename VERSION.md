@@ -28,7 +28,7 @@ python server.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.29 - update auto-refresh logic to use WebSocket instead of SSE"
+git commit -m "v0.0.30 - track WebSocket connection state and refresh on reconnect"
 git push
 python server.py
 
@@ -42,3 +42,4 @@ v0.0.26 - Modify docker-compose.yml to mount Docker socket for Telegram bot
 v0.0.27 - websocket instead SSE
 v0.0.28 - websocket tested with telegram actions
 v0.0.29 - update auto-refresh logic to use WebSocket instead of SSE
+v0.0.30 - track WebSocket connection state and refresh on reconnect

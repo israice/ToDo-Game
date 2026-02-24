@@ -131,6 +131,8 @@ function showRefreshIndicator() {
 
 // ========== WebSocket (Socket.IO) ==========
 
+let wasConnected = false;  // Track if we had a connection before
+
 function connectWebSocket() {
   if (socket) {
     socket.disconnect();
@@ -148,10 +150,18 @@ function connectWebSocket() {
   socket.on('connect', () => {
     console.log('✓ WebSocket connected:', socket.id);
     reconnectAttempts = 0;
+    
+    // If reconnecting after disconnection, refresh state to catch missed events
+    if (wasConnected) {
+      console.log('🔄 Reconnected - refreshing state...');
+      loadState();
+    }
+    wasConnected = true;
   });
 
   socket.on('disconnect', (reason) => {
     console.log('✗ WebSocket disconnected:', reason);
+    wasConnected = false;
   });
 
   socket.on('task_created', (data) => {
