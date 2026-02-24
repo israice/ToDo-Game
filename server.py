@@ -1088,6 +1088,11 @@ def graceful_shutdown():
 
 init_db()
 
+# Add cache busting for static files
+@app.context_processor
+def inject_version():
+    return {'app_version': get_version()}
+
 if __name__ == '__main__':
     debug_mode = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
     if debug_mode:

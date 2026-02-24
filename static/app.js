@@ -309,6 +309,10 @@ function connectWebSocket() {
   socket.on('server_shutdown', (data) => {
     console.log('🔄 Server shutting down:', data.message);
     showServerRestartIndicator();
+    // Auto-reload with cache bust after 2 seconds
+    setTimeout(() => {
+      window.location.reload(true);  // true forces reload from server
+    }, 2000);
   });
 
   console.log('📡 Connecting to WebSocket...');

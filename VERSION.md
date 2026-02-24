@@ -28,7 +28,7 @@ python server.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.34 - test"
+git commit -m "v0.0.35 - test 2"
 git push
 python server.py
 
