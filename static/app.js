@@ -1273,14 +1273,14 @@ window.addEventListener('focus', () => {
 });
 
 // Periodic background refresh (every 60 seconds)
-// Only used as fallback when SSE is not available
+// Only used as fallback when WebSocket is not available
 let refreshTimer = null;
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(() => {
-    // Only refresh if tab is visible and SSE is not connected
-    if (!document.hidden && !eventSource) {
-      console.log('Auto-refreshing data (SSE not available)...');
+    // Only refresh if tab is visible and WebSocket is not connected
+    if (!document.hidden && !socket) {
+      console.log('Auto-refreshing data (WebSocket not available)...');
       loadState();
     }
   }, 60000); // 60 seconds
@@ -1289,11 +1289,11 @@ function startAutoRefresh() {
 // Start auto-refresh
 startAutoRefresh();
 
-// Stop auto-refresh and SSE on page unload
+// Stop auto-refresh and WebSocket on page unload
 window.addEventListener('beforeunload', () => {
   if (refreshTimer) clearInterval(refreshTimer);
-  if (eventSource) {
-    eventSource.close();
-    console.log('SSE connection closed');
+  if (socket) {
+    socket.disconnect();
+    console.log('WebSocket connection closed');
   }
 });
