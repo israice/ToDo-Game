@@ -9,4 +9,4 @@ WORKDIR /app
 
 EXPOSE 5000
 
-CMD ["python", "server.py"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--worker-class", "eventlet", "server:app"]

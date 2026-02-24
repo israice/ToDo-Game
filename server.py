@@ -106,14 +106,15 @@ def handle_connect():
         user = conn.execute('SELECT id FROM users WHERE username = ?', (session['user'],)).fetchone()
         if not user:
             return False
-        
+
         user_id = user['id']
-        session_id = request.sid
-        
+        # request.sid is added by Flask-SocketIO during WebSocket connections
+        session_id = request.sid  # type: ignore[attr-defined]
+
         # Join user-specific room
         join_room(f'user_{user_id}')
         ws_manager.add_session(user_id, session_id)
-        
+
         print(f'✓ WebSocket connected: user_{user_id} session {session_id}')
         emit('connected', {'status': 'connected', 'user_id': user_id, 'sessionId': session_id})
         return True
@@ -123,12 +124,13 @@ def handle_disconnect():
     """Handle WebSocket disconnection"""
     if 'user' not in session:
         return
-    
+
     with get_db() as conn:
         user = conn.execute('SELECT id FROM users WHERE username = ?', (session['user'],)).fetchone()
         if user:
             user_id = user['id']
-            session_id = request.sid
+            # request.sid is added by Flask-SocketIO during WebSocket connections
+            session_id = request.sid  # type: ignore[attr-defined]
             leave_room(f'user_{user_id}')
             ws_manager.remove_session(user_id, session_id)
             print(f'✗ WebSocket disconnected: user_{user_id} session {session_id}')
@@ -1044,16 +1046,22 @@ def webhook():
         import time
         time.sleep(1)  # Let request complete
         try:
-            os.kill(parent_pid, signal.SIGHUP)
-            app.logger.info("✓ Gunicorn reloaded")
+            # SIGHUP only available on Unix systems
+            sighup = getattr(signal, 'SIGHUP', None)
+            if sighup is not None:
+                os.kill(parent_pid, sighup)
+                app.logger.info("✓ Gunicorn reloaded")
+            else:
+                app.logger.warning("SIGHUP not available on this platform")
         except ProcessLookupError:
             app.logger.error("Gunicorn master not found")
         except PermissionError:
             app.logger.error("Permission denied to send signal")
 
     # Send signal in background (use stderr redirect instead of capture_output for Popen)
+    # Use getattr to avoid Pylance error on Windows where SIGHUP doesn't exist
     subprocess.Popen(
-        ["python", "-c", f"import os, signal, time; time.sleep(1); os.kill({parent_pid}, signal.SIGHUP)"],
+        ["python", "-c", f"import os, signal, time; time.sleep(1); getattr(signal, 'SIGHUP', None) and os.kill({parent_pid}, getattr(signal, 'SIGHUP'))"],
         start_new_session=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
@@ -1066,4 +1074,8 @@ def webhook():
 init_db()
 
 if __name__ == '__main__':
-    socketio.run(app, debug=os.environ.get('FLASK_DEBUG', '').lower() == 'true', host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
+    debug_mode = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    if debug_mode:
+        socketio.run(app, debug=True, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
+    else:
+        socketio.run(app, host='0.0.0.0', port=5000)
