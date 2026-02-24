@@ -1042,23 +1042,23 @@ def webhook():
     else:
         app.logger.info("✓ Dependencies updated")
 
-    # Update telegram bot if exists
-    telegram_dir = os.path.join(os.path.dirname(__file__), 'telegram')
-    if os.path.exists(os.path.join(telegram_dir, 'package.json')):
-        app.logger.info("Updating Telegram bot...")
-        npm_cmd = ["npm", "install", "--production"]
-        result = subprocess.run(npm_cmd, cwd=telegram_dir, capture_output=True, text=True)
-        if result.returncode != 0:
-            app.logger.error(f"Npm install failed: {result.stderr}")
+    # Restart Telegram bot container (runs in separate Docker container)
+    app.logger.info("🔄 Restarting Telegram bot container...")
+    try:
+        result = subprocess.run(
+            ["docker", "restart", "todo-telegram-bot"],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0:
+            app.logger.info("✓ Telegram bot container restarted")
         else:
-            app.logger.info("✓ Telegram bot updated")
-        
-        # Graceful restart of bot via signal
-        restart_script = os.path.join(telegram_dir, 'restart-bot.sh')
-        if os.path.exists(restart_script):
-            subprocess.Popen(["sh", restart_script], cwd=telegram_dir, 
-                           start_new_session=True, capture_output=True)
-            app.logger.info("✓ Telegram bot restart signal sent")
+            app.logger.warning(f"⚠️ Docker restart failed: {result.stderr}")
+    except FileNotFoundError:
+        app.logger.warning("⚠️ Docker CLI not available - bot will update on next manual restart")
+    except subprocess.TimeoutExpired:
+        app.logger.warning("⚠️ Docker restart timeout")
+    except Exception as e:
+        app.logger.warning(f"⚠️ Could not restart bot container: {e}")
 
     # Graceful reload via SIGHUP to Gunicorn master
     # This reloads workers without dropping connections

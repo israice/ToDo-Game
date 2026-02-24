@@ -7,6 +7,7 @@ services:
       - "${PORT}:5000"
     volumes:
       - app_data:/app
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - REPO_URL=${REPO_URL}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET}

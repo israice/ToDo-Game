@@ -29,7 +29,7 @@ python server.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.25 - multi-tab support with unique tab IDs for SSE connections"
+git commit -m "v0.0.26 - Modify docker-compose.yml to mount Docker socket for Telegram bot"
 git push
 python server.py
 
@@ -59,3 +59,4 @@ v0.0.22 - graceful reload (zero downtime deploys)
 v0.0.23 - Add SSE events for real-time task updates
 v0.0.24 - gunicorn for automatic code reloading
 v0.0.25 - multi-tab support with unique tab IDs for SSE connections
+v0.0.26 - Modify docker-compose.yml to mount Docker socket for Telegram bot
