@@ -603,14 +603,20 @@ def bot_add_task(conn, user_id):
     
     conn.execute('INSERT INTO tasks (id, user_id, text, xp_reward) VALUES (?, ?, ?, ?)',
                  (task_id, user_id, text, xp))
-    
+
     # +3 XP for creating task
     progress = get_or_create_progress(conn, user_id)
     new_xp, new_level, new_xp_max, leveled_up = apply_xp(progress, 3)
     conn.execute('UPDATE user_progress SET xp=?, level=?, xp_max=? WHERE user_id=?',
                  (new_xp, new_level, new_xp_max, user_id))
     conn.commit()
-    
+
+    # Send SSE event for real-time update
+    send_user_event(user_id, 'task_created', {
+        'id': task_id, 'text': text, 'xp': xp,
+        'xpEarned': 3, 'level': new_level, 'currentXp': new_xp, 'xpMax': new_xp_max, 'leveledUp': leveled_up
+    })
+
     return jsonify({
         'success': True,
         'task': {'id': task_id, 'text': text, 'xp': xp},
@@ -627,13 +633,13 @@ def bot_complete_task(conn, user_id, task_id):
     task = conn.execute('SELECT * FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
     if not task:
         return jsonify({'success': False, 'error': 'Task not found'}), 404
-    
+
     progress = get_or_create_progress(conn, user_id)
     combo = progress['combo'] + 1
     xp_earned = int(task['xp_reward'] * (1 + combo * 0.1))
-    
+
     new_xp, new_level, new_xp_max, leveled_up = apply_xp(progress, xp_earned)
-    
+
     today, last_date = date.today().isoformat(), progress['last_completion_date']
     new_streak = progress['current_streak']
     if last_date != today:
@@ -643,13 +649,27 @@ def bot_complete_task(conn, user_id, task_id):
         else:
             new_streak = 1
     new_completed = progress['completed_tasks'] + 1
-    
+
     conn.execute('''UPDATE user_progress SET level=?, xp=?, xp_max=?, completed_tasks=?,
                     current_streak=?, combo=?, last_completion_date=? WHERE user_id=?''',
                  (new_level, new_xp, new_xp_max, new_completed, new_streak, combo, today, user_id))
     conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
     conn.commit()
-    
+
+    # Send SSE event for real-time update
+    send_user_event(user_id, 'task_completed', {
+        'id': task_id,
+        'xpEarned': xp_earned,
+        'level': new_level,
+        'xp': new_xp,
+        'xpMax': new_xp_max,
+        'completed': new_completed,
+        'streak': new_streak,
+        'combo': combo,
+        'leveledUp': leveled_up,
+        'newAchievements': []
+    })
+
     return jsonify({
         'success': True,
         'xpEarned': xp_earned,
@@ -664,6 +684,10 @@ def bot_delete_task(conn, user_id, task_id):
     """Delete task for Telegram bot"""
     conn.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id))
     conn.commit()
+
+    # Send SSE event for real-time update
+    send_user_event(user_id, 'task_deleted', {'id': task_id})
+
     return jsonify({'success': True})
 
 @app.route('/api/bot/tasks/<task_id>/rename', methods=['POST'])
@@ -673,13 +697,16 @@ def bot_rename_task(conn, user_id, task_id):
     """Rename task for Telegram bot"""
     data = request.get_json() or {}
     text = data.get('text', '').strip()
-    
+
     if not text:
         return jsonify({'success': False, 'error': 'Task text required'}), 400
-    
+
     conn.execute('UPDATE tasks SET text = ? WHERE id = ? AND user_id = ?', (text, task_id, user_id))
     conn.commit()
-    
+
+    # Send SSE event for real-time update
+    send_user_event(user_id, 'task_updated', {'id': task_id, 'text': text})
+
     return jsonify({'success': True})
 
 # ============== Media API ==============

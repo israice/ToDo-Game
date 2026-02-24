@@ -10,6 +10,13 @@
 └──────────────────────┴───────────────────────────────────┘
 docker compose up -d --build
 
+
+docker logs todo-game -f
+docker logs todo-telegram-bot -f
+
+
+
+
 # RECOVERY
 git log --oneline -n 5
 
@@ -22,7 +29,7 @@ python server.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.22 - graceful reload (zero downtime deploys)"
+git commit -m "v0.0.23 - Add SSE events for real-time task updates"
 git push
 python server.py
 
@@ -49,3 +56,4 @@ v0.0.19 - SSE real-time updates (instant sync between devices)
 v0.0.20 - Telegram bot Docker support
 v0.0.21 - webhook auto-deploy + all-in-one start scripts
 v0.0.22 - graceful reload (zero downtime deploys)
+v0.0.23 - Add SSE events for real-time task updates
