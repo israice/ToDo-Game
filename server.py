@@ -1066,4 +1066,4 @@ def webhook():
 init_db()
 
 if __name__ == '__main__':
-    app.run(debug=os.environ.get('FLASK_DEBUG', '').lower() == 'true')
+    socketio.run(app, debug=os.environ.get('FLASK_DEBUG', '').lower() == 'true', host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
