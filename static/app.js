@@ -129,6 +129,50 @@ function showRefreshIndicator() {
   }, 1000);
 }
 
+// Connection status indicator
+let connectionIndicator = null;
+function updateConnectionStatus(connected) {
+  if (!connectionIndicator) {
+    connectionIndicator = document.createElement('div');
+    connectionIndicator.id = 'connection-indicator';
+    connectionIndicator.style.cssText = 'position:fixed;bottom:10px;left:10px;padding:8px 12px;border-radius:4px;font-size:12px;z-index:9999;transition:opacity 0.3s;';
+    document.body.appendChild(connectionIndicator);
+  }
+
+  if (connected) {
+    connectionIndicator.style.background = '#00d9a5';
+    connectionIndicator.style.color = '#000';
+    connectionIndicator.textContent = '● Онлайн';
+    connectionIndicator.style.opacity = '0';
+    setTimeout(() => {
+      if (connectionIndicator) connectionIndicator.style.opacity = '0';
+    }, 2000);
+  } else {
+    connectionIndicator.style.background = '#e74c3c';
+    connectionIndicator.style.color = '#fff';
+    connectionIndicator.textContent = '● Нет соединения...';
+    connectionIndicator.style.opacity = '1';
+  }
+}
+
+function showConnectionLostIndicator() {
+  updateConnectionStatus(false);
+}
+
+function showServerRestartIndicator() {
+  if (!connectionIndicator) {
+    connectionIndicator = document.createElement('div');
+    connectionIndicator.id = 'connection-indicator';
+    connectionIndicator.style.cssText = 'position:fixed;bottom:10px;left:10px;padding:8px 12px;border-radius:4px;font-size:12px;z-index:9999;transition:opacity 0.3s;';
+    document.body.appendChild(connectionIndicator);
+  }
+
+  connectionIndicator.style.background = '#f39c12';
+  connectionIndicator.style.color = '#000';
+  connectionIndicator.textContent = '🔄 Сервер перезапускается...';
+  connectionIndicator.style.opacity = '1';
+}
+
 // ========== WebSocket (Socket.IO) ==========
 
 let wasConnected = false;  // Track if we had a connection before
@@ -150,18 +194,20 @@ function connectWebSocket() {
   socket.on('connect', () => {
     console.log('✓ WebSocket connected:', socket.id);
     reconnectAttempts = 0;
-    
+
     // If reconnecting after disconnection, refresh state to catch missed events
     if (wasConnected) {
       console.log('🔄 Reconnected - refreshing state...');
       loadState();
     }
     wasConnected = true;
+    updateConnectionStatus(true);
   });
 
   socket.on('disconnect', (reason) => {
     console.log('✗ WebSocket disconnected:', reason);
     wasConnected = false;
+    updateConnectionStatus(false);
   });
 
   socket.on('task_created', (data) => {
@@ -253,6 +299,16 @@ function connectWebSocket() {
 
   socket.on('reconnect_failed', () => {
     console.error('❌ Max reconnection attempts reached');
+    showConnectionLostIndicator();
+    // Auto-reload after 3 seconds
+    setTimeout(() => {
+      window.location.reload();
+    }, 3000);
+  });
+
+  socket.on('server_shutdown', (data) => {
+    console.log('🔄 Server shutting down:', data.message);
+    showServerRestartIndicator();
   });
 
   console.log('📡 Connecting to WebSocket...');

@@ -1036,6 +1036,9 @@ def webhook():
     except Exception as e:
         app.logger.warning(f"⚠️ Could not restart bot container: {e}")
 
+    # Graceful shutdown - notify WebSocket clients
+    graceful_shutdown()
+
     # Graceful reload via SIGHUP to Gunicorn master
     # This reloads workers without dropping connections
     import signal
@@ -1068,6 +1071,18 @@ def webhook():
     )
 
     return "OK", 200
+
+# ============== Graceful Shutdown Handler ==============
+
+def graceful_shutdown():
+    """Notify WebSocket clients before server shutdown/restart"""
+    try:
+        app.logger.info('📢 Notifying clients of server shutdown...')
+        socketio.emit('server_shutdown', {'message': 'Server restarting...'})
+        import time
+        time.sleep(1)  # Give clients time to receive notification
+    except Exception as e:
+        app.logger.error(f'Error during graceful shutdown: {e}')
 
 # ============== Init ==============
 
