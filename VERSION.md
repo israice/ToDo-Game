@@ -29,7 +29,7 @@ python server.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.23 - Add SSE events for real-time task updates"
+git commit -m "v0.0.24 - gunicorn for automatic code reloading"
 git push
 python server.py
 
@@ -57,3 +57,4 @@ v0.0.20 - Telegram bot Docker support
 v0.0.21 - webhook auto-deploy + all-in-one start scripts
 v0.0.22 - graceful reload (zero downtime deploys)
 v0.0.23 - Add SSE events for real-time task updates
+v0.0.24 - gunicorn for automatic code reloading
