@@ -28,9 +28,8 @@ python server.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.36 - test 2"
+git commit -m "v0.0.37 - test 3"
 git push
-python server.py
 
 # DEV LOG
 v0.0.21 - webhook auto-deploy + all-in-one start scripts

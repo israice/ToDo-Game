@@ -15,7 +15,7 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - FLASK_DEBUG=${FLASK_DEBUG:-false}
       - DOCKER_API_VERSION=1.44
-    entrypoint: ["/bin/sh", "-c", "if [ -z \"$REPO_URL\" ]; then echo 'ERROR: REPO_URL is not set. Create .env file with REPO_URL=https://github.com/username/repo.git' && exit 1; fi; BRANCH=${BRANCH:-master}; if [ -d /app/.git ]; then cd /app && git fetch origin && git reset --hard origin/$BRANCH; else rm -rf /app/* /app/.[!.]* 2>/dev/null; git clone --branch $BRANCH --single-branch $REPO_URL /app; fi && cd /app && pip install --no-cache-dir -r requirements.txt 2>/dev/null; exec gunicorn --bind 0.0.0.0:5000 --workers 2 --worker-class eventlet server:app"]
+    entrypoint: ["/bin/sh", "-c", "if [ -z \"$REPO_URL\" ]; then echo 'ERROR: REPO_URL is not set. Create .env file with REPO_URL=https://github.com/username/repo.git' && exit 1; fi; BRANCH=${BRANCH:-master}; echo '🔄 Fetching latest code...'; if [ -d /app/.git ]; then cd /app && git fetch origin && git reset --hard origin/$BRANCH && echo '✓ Code updated'; else rm -rf /app/* /app/.[!.]* 2>/dev/null; git clone --branch $BRANCH --single-branch $REPO_URL /app && echo '✓ Code cloned'; fi && echo '📦 Installing dependencies...' && pip install --no-cache-dir -r requirements.txt 2>/dev/null && echo '✓ Dependencies installed' && echo '🚀 Starting server...' && exec gunicorn --bind 0.0.0.0:5000 --workers 2 --worker-class eventlet server:app"]
 
   telegram-bot:
     container_name: todo-telegram-bot

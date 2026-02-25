@@ -159,18 +159,83 @@ function showConnectionLostIndicator() {
   updateConnectionStatus(false);
 }
 
+let serverRestartTimeout = null;
+let serverRestartTimer = null;
 function showServerRestartIndicator() {
-  if (!connectionIndicator) {
-    connectionIndicator = document.createElement('div');
-    connectionIndicator.id = 'connection-indicator';
-    connectionIndicator.style.cssText = 'position:fixed;bottom:10px;left:10px;padding:8px 12px;border-radius:4px;font-size:12px;z-index:9999;transition:opacity 0.3s;';
-    document.body.appendChild(connectionIndicator);
-  }
+  // Remove existing indicator if any
+  const existing = document.getElementById('server-restart-indicator');
+  if (existing) existing.remove();
 
-  connectionIndicator.style.background = '#f39c12';
-  connectionIndicator.style.color = '#000';
-  connectionIndicator.textContent = '🔄 Сервер перезапускается...';
-  connectionIndicator.style.opacity = '1';
+  // Create a prominent update indicator
+  const indicator = document.createElement('div');
+  indicator.id = 'server-restart-indicator';
+  
+  let countdown = 2; // 2 seconds until reload
+  
+  const updateCountdown = () => {
+    const countdownEl = document.getElementById('restart-countdown');
+    if (countdownEl) {
+      countdownEl.textContent = `Перезагрузка через ${countdown} сек...`;
+      countdown--;
+      if (countdown < 0) {
+        countdownEl.textContent = 'Загрузка...';
+      }
+    }
+  };
+
+  indicator.innerHTML = `
+    <div style="
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px 40px;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      text-align: center;
+      z-index: 10000;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      animation: slideIn 0.3s ease-out;
+    ">
+      <div style="font-size: 48px; margin-bottom: 15px; animation: spin 1s linear infinite;">🔄</div>
+      <div style="font-size: 18px; font-weight: 600; margin-bottom: 10px;">Сервер обновляется</div>
+      <div style="font-size: 14px; opacity: 0.9;">Загружаем новую версию...</div>
+      <div id="restart-countdown" style="margin-top: 20px; font-size: 12px; opacity: 0.7;">Перезагрузка через ${countdown} сек...</div>
+    </div>
+    <style>
+      @keyframes slideIn {
+        from { opacity: 0; transform: translate(-50%, -60%); }
+        to { opacity: 1; transform: translate(-50%, -50%); }
+      }
+      @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+    </style>
+  `;
+  document.body.appendChild(indicator);
+
+  // Update countdown every second
+  serverRestartTimer = setInterval(updateCountdown, 1000);
+
+  // Auto-hide after 10 seconds if something goes wrong
+  if (serverRestartTimeout) clearTimeout(serverRestartTimeout);
+  serverRestartTimeout = setTimeout(() => {
+    hideServerRestartIndicator();
+  }, 10000);
+}
+
+function hideServerRestartIndicator() {
+  const indicator = document.getElementById('server-restart-indicator');
+  if (indicator) {
+    indicator.style.opacity = '0';
+    indicator.style.transition = 'opacity 0.3s';
+    setTimeout(() => indicator.remove(), 300);
+  }
+  if (serverRestartTimeout) clearTimeout(serverRestartTimeout);
+  if (serverRestartTimer) clearInterval(serverRestartTimer);
 }
 
 // ========== WebSocket (Socket.IO) ==========
@@ -207,7 +272,12 @@ function connectWebSocket() {
   socket.on('disconnect', (reason) => {
     console.log('✗ WebSocket disconnected:', reason);
     wasConnected = false;
-    updateConnectionStatus(false);
+    
+    // Don't show "connection lost" if server is restarting
+    const restartIndicator = document.getElementById('server-restart-indicator');
+    if (!restartIndicator) {
+      updateConnectionStatus(false);
+    }
   });
 
   socket.on('task_created', (data) => {
@@ -311,6 +381,7 @@ function connectWebSocket() {
     showServerRestartIndicator();
     // Auto-reload with cache bust after 2 seconds
     setTimeout(() => {
+      hideServerRestartIndicator();
       window.location.reload(true);  // true forces reload from server
     }, 2000);
   });
@@ -1358,6 +1429,12 @@ function startAutoRefresh() {
 
 // Start auto-refresh
 startAutoRefresh();
+
+// Clean up any leftover restart indicator on page load
+document.addEventListener('DOMContentLoaded', () => {
+  const indicator = document.getElementById('server-restart-indicator');
+  if (indicator) indicator.remove();
+});
 
 // Stop auto-refresh and WebSocket on page unload
 window.addEventListener('beforeunload', () => {

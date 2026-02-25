@@ -1,10 +1,43 @@
 const https = require('https');
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const config = require('./config');
+
+const SESSIONS_FILE = path.join(__dirname, '.sessions.json');
 
 class ApiService {
   constructor() {
     this.sessions = new Map(); // Map<userId, { token, username, userId }>
+    this.loadSessions();
+  }
+
+  loadSessions() {
+    try {
+      if (fs.existsSync(SESSIONS_FILE)) {
+        const data = fs.readFileSync(SESSIONS_FILE, 'utf8');
+        const sessionsData = JSON.parse(data);
+        Object.entries(sessionsData).forEach(([userId, session]) => {
+          this.sessions.set(parseInt(userId), session);
+        });
+        console.log(`✓ Loaded ${this.sessions.size} sessions from file`);
+      }
+    } catch (error) {
+      console.error('⚠️ Error loading sessions:', error.message);
+    }
+  }
+
+  saveSessions() {
+    try {
+      const sessionsData = {};
+      this.sessions.forEach((session, userId) => {
+        sessionsData[userId] = session;
+      });
+      fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessionsData, null, 2), 'utf8');
+      console.log(`✓ Saved ${this.sessions.size} sessions to file`);
+    } catch (error) {
+      console.error('⚠️ Error saving sessions:', error.message);
+    }
   }
 
   _request(method, path, data = {}) {
@@ -59,13 +92,14 @@ class ApiService {
 
     try {
       const result = await this._request('POST', '/api/auth/login', { username, password });
-      
+
       if (result.success) {
         this.sessions.set(userId, {
           token: result.token,
           username: result.username,
           userId: result.user_id
         });
+        this.saveSessions();
         console.log(`✓ Login successful for user ${userId}`);
         return { success: true };
       } else {
@@ -91,21 +125,22 @@ class ApiService {
 
     try {
       const result = await this._request('POST', '/api/auth/register', { username, password });
-      
+
       if (result.success) {
         this.sessions.set(userId, {
           token: result.token,
           username: result.username,
           userId: result.user_id
         });
+        this.saveSessions();
         console.log(`✓ Registration successful for user ${userId}`);
         return { success: true };
       } else {
         console.log(`✗ Registration failed for user ${userId}:`, result.error);
-        return { 
-          success: false, 
-          error: result.error, 
-          alreadyExists: result.alreadyExists || false 
+        return {
+          success: false,
+          error: result.error,
+          alreadyExists: result.alreadyExists || false
         };
       }
     } catch (error) {
@@ -258,8 +293,9 @@ class ApiService {
       } catch (e) {
         // Ignore logout errors
       }
-      
+
       this.sessions.delete(userId);
+      this.saveSessions();
       console.log(`✓ Session closed for user ${userId}`);
     }
   }

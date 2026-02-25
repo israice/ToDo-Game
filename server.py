@@ -28,6 +28,10 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.secret_key = os.environ.get('SECRET_KEY') or (_ for _ in ()).throw(RuntimeError("SECRET_KEY required"))
 csrf = CSRFProtect(app)
 
+# Disable template caching in production to ensure version updates after deploy
+app.config['TEMPLATES_AUTO_RELOAD'] = True
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+
 # Initialize Socket.IO
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
@@ -253,11 +257,15 @@ def apply_xp(progress, xp_amount):
 
 def get_version():
     try:
-        with open(os.path.join(os.path.dirname(__file__), 'VERSION.md'), 'r', encoding='utf-8') as f:
+        version_file = os.path.join(os.path.dirname(__file__), 'VERSION.md')
+        with open(version_file, 'r', encoding='utf-8') as f:
             for line in reversed(f.readlines()):
                 if line.strip().startswith('v'):
-                    return line.strip().split()[0]
-    except: pass
+                    version = line.strip().split()[0]
+                    app.logger.debug(f'Version read from file: {version}')
+                    return version
+    except Exception as e:
+        app.logger.error(f'Error reading VERSION.md: {e}')
     return 'v0.0.0'
 
 # ============== Auth Routes ==============
@@ -269,7 +277,8 @@ def well_known(path):
 @app.route('/')
 def index():
     if 'user' in session:
-        return render_template('dashboard.html', user=session['user'], version=get_version())
+        # Force re-read version on every request (not cached)
+        return render_template('dashboard.html', user=session['user'], version=get_version(), app_version=get_version())
     return render_template('login.html', register_error=session.pop('register_error', None))
 
 @app.route('/login', methods=['POST'])
@@ -1036,11 +1045,46 @@ def webhook():
     except Exception as e:
         app.logger.warning(f"⚠️ Could not restart bot container: {e}")
 
-    # Graceful shutdown - notify WebSocket clients
-    graceful_shutdown()
+    # Graceful shutdown - notify WebSocket clients BEFORE restart
+    app.logger.info('📢 Notifying clients of server shutdown...')
+    try:
+        socketio.emit('server_shutdown', {'message': 'Server restarting...'})
+        import time
+        time.sleep(1.5)  # Give clients time to receive notification
+    except Exception as e:
+        app.logger.error(f'Error during graceful shutdown: {e}')
 
-    # Graceful reload via SIGHUP to Gunicorn master
-    # This reloads workers without dropping connections
+    # Full container restart for clean reload (ensures templates are reloaded)
+    app.logger.info("🔄 Restarting web container for clean reload...")
+    try:
+        env = os.environ.copy()
+        env['DOCKER_API_VERSION'] = '1.44'
+
+        # Restart THIS container (todo-game)
+        result = subprocess.run(
+            ["docker", "restart", "todo-game"],
+            capture_output=True, text=True, timeout=30, env=env
+        )
+        if result.returncode == 0:
+            app.logger.info("✓ Web container restarting...")
+        else:
+            app.logger.warning(f"⚠️ Docker restart failed: {result.stderr}")
+            # Fallback to SIGHUP if docker restart fails
+            fallback_sighup()
+    except FileNotFoundError:
+        app.logger.warning("⚠️ Docker CLI not available - using SIGHUP fallback")
+        fallback_sighup()
+    except subprocess.TimeoutExpired:
+        app.logger.warning("⚠️ Docker restart timeout")
+        fallback_sighup()
+    except Exception as e:
+        app.logger.warning(f"⚠️ Could not restart container: {e}")
+        fallback_sighup()
+
+    return "OK", 200
+
+def fallback_sighup():
+    """Fallback: Send SIGHUP to Gunicorn master if docker restart fails"""
     import signal
     parent_pid = os.getppid()
     app.logger.info(f"🔄 Sending SIGHUP to Gunicorn master (PID: {parent_pid})")
@@ -1064,25 +1108,11 @@ def webhook():
     # Send signal in background (use stderr redirect instead of capture_output for Popen)
     # Use getattr to avoid Pylance error on Windows where SIGHUP doesn't exist
     subprocess.Popen(
-        ["python", "-c", f"import os, signal, time; time.sleep(1); getattr(signal, 'SIGHUP', None) and os.kill({parent_pid}, getattr(signal, 'SIGHUP'))"],
+        ["python", "-c", f"import os, signal, time; time.sleep(1); getattr(signal, 'SIGHUP', None) and os.kill({os.getppid()}, getattr(signal, 'SIGHUP'))"],
         start_new_session=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
     )
-
-    return "OK", 200
-
-# ============== Graceful Shutdown Handler ==============
-
-def graceful_shutdown():
-    """Notify WebSocket clients before server shutdown/restart"""
-    try:
-        app.logger.info('📢 Notifying clients of server shutdown...')
-        socketio.emit('server_shutdown', {'message': 'Server restarting...'})
-        import time
-        time.sleep(1)  # Give clients time to receive notification
-    except Exception as e:
-        app.logger.error(f'Error during graceful shutdown: {e}')
 
 # ============== Init ==============
 
