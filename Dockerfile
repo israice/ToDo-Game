@@ -20,8 +20,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create data directory for persistent volumes
-RUN mkdir -p /app/data
+# Create data directory and migrate old data if exists
+RUN mkdir -p /app/data && \
+    ( [ -f /app/users.db ] && mv /app/users.db /app/data/ || true ) && \
+    ( [ -d /app/uploads ] && mv /app/uploads /app/data/ || true ) && \
+    chmod -R 755 /app/data
 
 EXPOSE 5000
 

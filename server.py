@@ -39,7 +39,7 @@ WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 BRANCH = os.environ.get("BRANCH", "master")
 
 # Media uploads configuration
-UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
+UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'data', 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4', 'webm', 'mov'}
 
@@ -143,7 +143,10 @@ def handle_disconnect():
 
 @contextmanager
 def get_db():
-    conn = sqlite3.connect('users.db')
+    # Store database in /app/data for persistence across deployments
+    db_path = os.path.join(os.path.dirname(__file__), 'data', 'users.db')
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
         yield conn

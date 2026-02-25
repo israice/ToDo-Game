@@ -283,6 +283,12 @@ function connectWebSocket() {
   socket.on('task_created', (data) => {
     console.log('📝 Task created (WS):', data);
 
+    // Skip if this task is already added from API response (same tab)
+    if (pendingTasks.has(data.id)) {
+      console.log('⊘ Skipping duplicate task_created event for pending task:', data.id);
+      return;
+    }
+
     // Check if this is from another tab/window
     const existingTask = state.tasks.find(t => t.id === data.id);
     if (!existingTask) {
@@ -507,6 +513,8 @@ function showPopup(type, data) {
 }
 
 // ========== TASK ACTIONS ==========
+let pendingTasks = new Set(); // Track tasks being created
+
 async function addTask(text) {
   if (!text.trim()) return;
 
@@ -516,6 +524,9 @@ async function addTask(text) {
   });
 
   if (result && result.id) {
+    // Mark as pending to avoid duplicate from WebSocket
+    pendingTasks.add(result.id);
+    
     state.tasks.unshift({ id: result.id, text: result.text, xp: result.xp });
 
     // +3 XP за создание задачи
@@ -530,6 +541,9 @@ async function addTask(text) {
     renderTasks();
     updateUI();
     playSound('add');
+    
+    // Clear pending after short delay
+    setTimeout(() => pendingTasks.delete(result.id), 1000);
   }
 }
 
