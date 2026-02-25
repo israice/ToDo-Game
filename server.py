@@ -258,18 +258,27 @@ def apply_xp(progress, xp_amount):
         leveled_up = True
     return new_xp, new_level, new_xp_max, leveled_up
 
+# Cache version after first read
+_version_cache = None
+
 def get_version():
+    global _version_cache
+    if _version_cache is not None:
+        return _version_cache
+    
     try:
         version_file = os.path.join(os.path.dirname(__file__), 'VERSION.md')
         with open(version_file, 'r', encoding='utf-8') as f:
             for line in reversed(f.readlines()):
                 if line.strip().startswith('v'):
                     version = line.strip().split()[0]
-                    app.logger.debug(f'Version read from file: {version}')
+                    _version_cache = version
                     return version
     except Exception as e:
         app.logger.error(f'Error reading VERSION.md: {e}')
-    return 'v0.0.0'
+    
+    _version_cache = 'v0.0.0'
+    return _version_cache
 
 # ============== Auth Routes ==============
 
