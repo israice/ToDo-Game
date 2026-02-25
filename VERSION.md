@@ -28,7 +28,7 @@ python server.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.38 - test 4"
+git commit -m "v0.0.38 - test 5"
 git push
 
 # DEV LOG

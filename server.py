@@ -274,6 +274,15 @@ def get_version():
 def well_known(path):
     return '', 204
 
+@app.route('/.well-known/health')
+def health_check():
+    """Health check endpoint for Docker healthcheck and load balancers"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'version': get_version()
+    }), 200
+
 @app.route('/')
 def index():
     if 'user' in session:
@@ -1006,6 +1015,10 @@ def webhook():
 
     app.logger.info("🔄 Webhook received - starting update...")
 
+    # Get current commit hash before update
+    result = subprocess.run(["git", "rev-parse", "HEAD"], cwd="/app", capture_output=True, text=True)
+    old_commit = result.stdout.strip() if result.returncode == 0 else None
+
     # Git update
     for cmd in [["git", "fetch", "origin"], ["git", "reset", "--hard", f"origin/{BRANCH}"]]:
         result = subprocess.run(cmd, cwd="/app", capture_output=True, text=True)
@@ -1013,106 +1026,123 @@ def webhook():
             app.logger.error(f"{cmd[1]} failed: {result.stderr}")
             return f"Git {cmd[1]} failed", 500
 
-    app.logger.info("✓ Code updated")
+    # Get new commit hash after update
+    result = subprocess.run(["git", "rev-parse", "HEAD"], cwd="/app", capture_output=True, text=True)
+    new_commit = result.stdout.strip() if result.returncode == 0 else None
 
-    # Update requirements if changed
-    pip_cmd = ["pip", "install", "--no-cache-dir", "-r", "requirements.txt"]
-    result = subprocess.run(pip_cmd, cwd="/app", capture_output=True, text=True)
-    if result.returncode != 0:
-        app.logger.error(f"Pip install failed: {result.stderr}")
-    else:
-        app.logger.info("✓ Dependencies updated")
+    # Check if code actually changed
+    if old_commit == new_commit:
+        app.logger.info("✓ No changes detected - skipping update")
+        return "OK (no changes)", 200
 
-    # Restart Telegram bot container (runs in separate Docker container)
-    app.logger.info("🔄 Restarting Telegram bot container...")
-    try:
-        # Set DOCKER_API_VERSION to match server
-        env = os.environ.copy()
-        env['DOCKER_API_VERSION'] = '1.44'
-        
-        result = subprocess.run(
-            ["docker", "restart", "todo-telegram-bot"],
-            capture_output=True, text=True, timeout=30, env=env
-        )
-        if result.returncode == 0:
-            app.logger.info("✓ Telegram bot container restarted")
+    app.logger.info(f"✓ Code updated: {old_commit[:7] if old_commit else 'unknown'} → {new_commit[:7] if new_commit else 'unknown'}")
+
+    # Check if requirements.txt changed
+    result = subprocess.run(
+        ["git", "diff", "--name-only", old_commit, new_commit] if old_commit else ["git", "diff", "--name-only", "HEAD~1", "HEAD"],
+        cwd="/app", capture_output=True, text=True
+    )
+    changed_files = result.stdout.strip().split('\n') if result.stdout.strip() else []
+    requirements_changed = 'requirements.txt' in changed_files
+    bot_code_changed = any(f.startswith('telegram/') for f in changed_files)
+
+    # Update requirements only if changed
+    if requirements_changed:
+        app.logger.info("📦 requirements.txt changed - updating dependencies...")
+        pip_cmd = ["pip", "install", "--no-cache-dir", "-r", "requirements.txt"]
+        result = subprocess.run(pip_cmd, cwd="/app", capture_output=True, text=True)
+        if result.returncode != 0:
+            app.logger.error(f"Pip install failed: {result.stderr}")
         else:
-            app.logger.warning(f"⚠️ Docker restart failed: {result.stderr}")
-    except FileNotFoundError:
-        app.logger.warning("⚠️ Docker CLI not available - bot will update on next manual restart")
-    except subprocess.TimeoutExpired:
-        app.logger.warning("⚠️ Docker restart timeout")
-    except Exception as e:
-        app.logger.warning(f"⚠️ Could not restart bot container: {e}")
+            app.logger.info("✓ Dependencies updated")
+    else:
+        app.logger.info("✓ requirements.txt unchanged - skipping pip install")
 
-    # Graceful shutdown - notify WebSocket clients BEFORE restart
-    app.logger.info('📢 Notifying clients of server shutdown...')
+    # Restart Telegram bot container only if bot code changed
+    if bot_code_changed:
+        app.logger.info("🔄 Telegram bot code changed - restarting...")
+        try:
+            env = os.environ.copy()
+            env['DOCKER_API_VERSION'] = '1.44'
+            result = subprocess.run(
+                ["docker", "restart", "todo-telegram-bot"],
+                capture_output=True, text=True, timeout=30, env=env
+            )
+            if result.returncode == 0:
+                app.logger.info("✓ Telegram bot container restarted")
+            else:
+                app.logger.warning(f"⚠️ Docker restart failed: {result.stderr}")
+        except FileNotFoundError:
+            app.logger.warning("⚠️ Docker CLI not available - bot will update on next manual restart")
+        except subprocess.TimeoutExpired:
+            app.logger.warning("⚠️ Docker restart timeout")
+        except Exception as e:
+            app.logger.warning(f"⚠️ Could not restart bot container: {e}")
+    else:
+        app.logger.info("✓ Telegram bot code unchanged - skipping restart")
+
+    # Graceful shutdown - notify WebSocket clients BEFORE reload
+    app.logger.info('📢 Notifying clients of server reload...')
     try:
-        socketio.emit('server_shutdown', {'message': 'Server restarting...'})
-        import time
-        time.sleep(1.5)  # Give clients time to receive notification
+        socketio.emit('server_shutdown', {'message': 'Server reloading...'})
     except Exception as e:
-        app.logger.error(f'Error during graceful shutdown: {e}')
+        app.logger.error(f'Error notifying clients: {e}')
 
-    # Full container restart for clean reload (ensures templates are reloaded)
-    app.logger.info("🔄 Restarting web container for clean reload...")
+    # Use SIGHUP for graceful reload (no downtime)
+    app.logger.info("🔄 Sending SIGHUP for graceful reload...")
+    graceful_reload()
+
+    return "OK", 200
+
+def graceful_reload():
+    """Graceful reload using SIGHUP (zero downtime)"""
+    import signal
+    
+    def send_hup():
+        import time
+        time.sleep(0.5)  # Let request complete
+        try:
+            parent_pid = os.getppid()
+            app.logger.info(f"📡 Sending SIGHUP to Gunicorn master (PID: {parent_pid})")
+            sighup = getattr(signal, 'SIGHUP', None)
+            if sighup is not None:
+                os.kill(parent_pid, sighup)
+                app.logger.info("✓ Gunicorn reloaded gracefully")
+            else:
+                app.logger.warning("⚠️ SIGHUP not available - attempting docker restart fallback")
+                fallback_docker_restart()
+        except ProcessLookupError:
+            app.logger.error("✗ Gunicorn master not found - attempting docker restart")
+            fallback_docker_restart()
+        except PermissionError:
+            app.logger.error("✗ Permission denied to send signal")
+        except Exception as e:
+            app.logger.error(f"✗ SIGHUP failed: {e}")
+            fallback_docker_restart()
+
+    # Send signal in background
+    subprocess.Popen(
+        ["python", "-c", f"import os, signal, time; time.sleep(0.5); sighup=getattr(signal, 'SIGHUP', None); sighup and os.kill({os.getppid()}, sighup)"],
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
+def fallback_docker_restart():
+    """Fallback: restart container if SIGHUP fails"""
     try:
         env = os.environ.copy()
         env['DOCKER_API_VERSION'] = '1.44'
-
-        # Restart THIS container (todo-game)
         result = subprocess.run(
             ["docker", "restart", "todo-game"],
             capture_output=True, text=True, timeout=30, env=env
         )
         if result.returncode == 0:
-            app.logger.info("✓ Web container restarting...")
+            app.logger.info("✓ Container restarted via docker restart")
         else:
-            app.logger.warning(f"⚠️ Docker restart failed: {result.stderr}")
-            # Fallback to SIGHUP if docker restart fails
-            fallback_sighup()
-    except FileNotFoundError:
-        app.logger.warning("⚠️ Docker CLI not available - using SIGHUP fallback")
-        fallback_sighup()
-    except subprocess.TimeoutExpired:
-        app.logger.warning("⚠️ Docker restart timeout")
-        fallback_sighup()
+            app.logger.error(f"✗ Docker restart failed: {result.stderr}")
     except Exception as e:
-        app.logger.warning(f"⚠️ Could not restart container: {e}")
-        fallback_sighup()
-
-    return "OK", 200
-
-def fallback_sighup():
-    """Fallback: Send SIGHUP to Gunicorn master if docker restart fails"""
-    import signal
-    parent_pid = os.getppid()
-    app.logger.info(f"🔄 Sending SIGHUP to Gunicorn master (PID: {parent_pid})")
-
-    def send_hup():
-        import time
-        time.sleep(1)  # Let request complete
-        try:
-            # SIGHUP only available on Unix systems
-            sighup = getattr(signal, 'SIGHUP', None)
-            if sighup is not None:
-                os.kill(parent_pid, sighup)
-                app.logger.info("✓ Gunicorn reloaded")
-            else:
-                app.logger.warning("SIGHUP not available on this platform")
-        except ProcessLookupError:
-            app.logger.error("Gunicorn master not found")
-        except PermissionError:
-            app.logger.error("Permission denied to send signal")
-
-    # Send signal in background (use stderr redirect instead of capture_output for Popen)
-    # Use getattr to avoid Pylance error on Windows where SIGHUP doesn't exist
-    subprocess.Popen(
-        ["python", "-c", f"import os, signal, time; time.sleep(1); getattr(signal, 'SIGHUP', None) and os.kill({os.getppid()}, getattr(signal, 'SIGHUP'))"],
-        start_new_session=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
+        app.logger.error(f"✗ Fallback restart failed: {e}")
 
 # ============== Init ==============
 
