@@ -28,7 +28,7 @@ python server.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.37 - test 3"
+git commit -m "v0.0.38 - test 4"
 git push
 
 # DEV LOG
@@ -45,3 +45,4 @@ v0.0.30 - track WebSocket connection state and refresh on reconnect
 v0.0.31 - more ative tasks in list less paddings
 v0.0.32 - test 1
 v0.0.33 - test 2
+v0.0.38 - test 4
