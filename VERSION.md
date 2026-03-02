@@ -50,3 +50,4 @@ v0.0.35 - server test 1
 v0.0.36 - server test 2
 v0.0.37 - server test 3
 v0.0.38 - server test 4
+v0.0.39 - server test 5

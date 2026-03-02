@@ -47,14 +47,14 @@ services:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - API_URL=http://web:5000  # Docker override; source of truth: SETTINGS.py
       - ADMIN_TELEGRAM_ID=${ADMIN_TELEGRAM_ID:-}
-      # BWS (if enabled, bot reads tokens from .env populated by web service)
+      # BWS secrets loader
       - BITWARDEN_ENABLED=${BITWARDEN_ENABLED:-0}
       - BWS_ACCESS_TOKEN=${BWS_ACCESS_TOKEN:-}
       - BWS_PROJECT_ID=${BWS_PROJECT_ID:-}
     depends_on:
       web:
         condition: service_healthy
-    entrypoint: ["/bin/sh", "-c", "npm install && node run.js"]
+    entrypoint: ["/bin/sh", "-c", "npm install && if [ \"$$BITWARDEN_ENABLED\" = \"1\" ] && [ -n \"$$BWS_ACCESS_TOKEN\" ] && [ -n \"$$BWS_PROJECT_ID\" ]; then echo 'BWS: fetching secrets...'; SECRETS=$$(BWS_ACCESS_TOKEN=$$BWS_ACCESS_TOKEN bws secret list $$BWS_PROJECT_ID 2>/dev/null); if [ -n \"$$SECRETS\" ]; then export TELEGRAM_BOT_TOKEN=$$(echo $$SECRETS | sed -n 's/.*\"key\":\"TELEGRAM_BOT_TOKEN\",\"value\":\"\\([^\"]*\\)\".*/\\1/p'); export ADMIN_TELEGRAM_ID=$$(echo $$SECRETS | sed -n 's/.*\"key\":\"ADMIN_TELEGRAM_ID\",\"value\":\"\\([^\"]*\\)\".*/\\1/p'); echo \"BWS: loaded TELEGRAM_BOT_TOKEN, ADMIN_TELEGRAM_ID\"; fi; fi && exec node run.js"]
 
 volumes:
   app_data:
