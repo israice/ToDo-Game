@@ -86,7 +86,7 @@ class ApiService {
     for (const [uid, session] of this.sessions.entries()) {
       if (session.username === username && uid !== userId) {
         console.log(`✗ Login failed: account "${username}" is already in use by user ${uid}`);
-        return { success: false, error: 'Этот аккаунт уже используется другим пользователем', alreadyInUse: true };
+        return { success: false, error: 'This account is already in use by another user', alreadyInUse: true };
       }
     }
 
@@ -119,7 +119,7 @@ class ApiService {
     for (const [uid, session] of this.sessions.entries()) {
       if (session.username === username && uid !== userId) {
         console.log(`✗ Registration failed: account "${username}" is already in use by user ${uid}`);
-        return { success: false, error: 'Этот аккаунт уже используется другим пользователем', alreadyInUse: true };
+        return { success: false, error: 'This account is already in use by another user', alreadyInUse: true };
       }
     }
 

@@ -2,7 +2,7 @@
 
 # 🎮 TODO GAME
 
-## **Твои задачи. Твоя игра. Твоя победа.**
+## **Your tasks. Your game. Your victory.**
 
 <br>
 
@@ -25,56 +25,56 @@
 
 <br>
 
-## 🎯 Что это?
+## 🎯 What is this?
 
-**TODO GAME** — это не очередной скучный список дел.
+**TODO GAME** — this is not just another boring to-do list.
 
-Это полноценная **RPG-система**, встроенная в твой ежедневный workflow. Каждая задача — это монстр, которого нужно победить. Каждая галочка — это **+XP** к твоему персонажу.
+It's a full-fledged **RPG system** built into your daily workflow. Every task is a monster you need to defeat. Every checkmark is **+XP** for your character.
 
 ```
    ╔══════════════════════════════════════════╗
-   ║  ПРОКАЧАЙ СВОЮ ЖИЗНЬ                     ║
-   ║  ████████████████░░░░░░  78%  УР. 12    ║
-   ║  🔥 КОМБО x7   ⚡ +245 XP   📅 СЕРИЯ 14  ║
+   ║  LEVEL UP YOUR LIFE                      ║
+   ║  ████████████████░░░░░░  78%  LVL 12    ║
+   ║  🔥 COMBO x7   ⚡ +245 XP   📅 STREAK 14 ║
    ╚══════════════════════════════════════════╝
 ```
 
-## 🔥 Почему это вызывает привыкание
+## 🔥 Why it's addictive
 
 <table>
 <tr>
 <td width="50%">
 
-### ⚔️ БОЕВАЯ СИСТЕМА
+### ⚔️ COMBAT SYSTEM
 
-Выполняешь задачу → получаешь **20-35 XP**
+Complete a task → earn **20-35 XP**
 
-Но это только начало...
+But that's just the beginning...
 
 **COMBO SYSTEM:**
-- Выполнил задачу? Таймер пошёл!
-- **5 секунд** на следующую
+- Completed a task? The timer starts!
+- **5 seconds** for the next one
 - Combo x2 → x3 → x4 → **x10!**
-- Каждый combo = **+10% к XP**
+- Each combo = **+10% to XP**
 
-*Одна удачная серия = больше опыта, чем за весь день*
+*One good streak = more XP than the entire day*
 
 </td>
 <td width="50%">
 
-### 📈 ПРОГРЕССИЯ
+### 📈 PROGRESSION
 
 ```
-LVL 1   ░░░░░░░░░░  Новичок
-LVL 10  ████░░░░░░  Воин рутины
-LVL 25  ███████░░░  Мастер дел
-LVL 50  ██████████  ЛЕГЕНДА
+LVL 1   ░░░░░░░░░░  Rookie
+LVL 10  ████░░░░░░  Routine Warrior
+LVL 25  ███████░░░  Task Master
+LVL 50  ██████████  LEGEND
 ```
 
-Экспоненциальная кривая:
-- Первые уровни летят быстро
-- Высокие — требуют dedication
-- Чувство прогресса **каждый день**
+Exponential curve:
+- Early levels fly by fast
+- Higher ones — require dedication
+- A sense of progress **every single day**
 
 </td>
 </tr>
@@ -82,88 +82,88 @@ LVL 50  ██████████  ЛЕГЕНДА
 
 ---
 
-## 🏆 12 ДОСТИЖЕНИЙ
+## 🏆 12 ACHIEVEMENTS
 
-Охоться за ними всеми:
+Hunt them all down:
 
-| Достижение | Условие | Редкость |
+| Achievement | Condition | Rarity |
 |:----------:|---------|:--------:|
-| 🏅 **Первые шаги** | Выполни первый квест | Обычное |
-| ⚔️ **Путешественник** | Выполни 5 квестов | Обычное |
-| 🛡️ **Ветеран** | Выполни 10 квестов | Необычное |
-| 🦁 **Герой** | Выполни 25 квестов | Редкое |
-| 👑 **Легенда** | Выполни 50 квестов | **ЭПИЧЕСКОЕ** |
-| 🔥 **Начало комбо** | Комбо x3 | Обычное |
-| ⚡ **В огне!** | Комбо x5 | Необычное |
-| 🌟 **Неудержимый** | Комбо x10 | Редкое |
-| ⭐ **Восходящая звезда** | Достичь 5 уровня | Обычное |
-| 💎 **Мастер** | Достичь 10 уровня | Необычное |
-| 💪 **Воин недели** | Серия 7 дней | Редкое |
-| 🏆 **Мастер месяца** | Серия 30 дней | **ЛЕГЕНДАРНОЕ** |
+| 🏅 **First Steps** | Complete your first quest | Common |
+| ⚔️ **Traveler** | Complete 5 quests | Common |
+| 🛡️ **Veteran** | Complete 10 quests | Uncommon |
+| 🦁 **Hero** | Complete 25 quests | Rare |
+| 👑 **Legend** | Complete 50 quests | **EPIC** |
+| 🔥 **Combo Starter** | Combo x3 | Common |
+| ⚡ **On Fire!** | Combo x5 | Uncommon |
+| 🌟 **Unstoppable** | Combo x10 | Rare |
+| ⭐ **Rising Star** | Reach level 5 | Common |
+| 💎 **Master** | Reach level 10 | Uncommon |
+| 💪 **Weekly Warrior** | 7-day streak | Rare |
+| 🏆 **Monthly Master** | 30-day streak | **LEGENDARY** |
 
 ---
 
-## 🎧 ПОЛНОЕ ПОГРУЖЕНИЕ
+## 🎧 FULL IMMERSION
 
 <div align="center">
 
-**Процедурно генерируемые звуки** через Web Audio API
+**Procedurally generated sounds** via Web Audio API
 
 </div>
 
 ```
-🔊 Добавление задачи    → мягкий "блуп"
-✅ Выполнение           → сочный "динь!"
-🔥 Combo                → нарастающий "вжух!"
-⬆️ Level Up             → эпичная фанфара
-🏆 Achievement          → победный аккорд
+🔊 Adding a task        → soft "bloop"
+✅ Completing            → satisfying "ding!"
+🔥 Combo                → escalating "whoosh!"
+⬆️ Level Up             → epic fanfare
+🏆 Achievement          → triumphant chord
 ```
 
-*Каждое действие ощущается как маленькая победа*
+*Every action feels like a small victory*
 
 ---
 
-## 🌗 ДВЕ ТЕМЫ
+## 🌗 TWO THEMES
 
 <table>
 <tr>
 <td align="center" width="50%">
 
-### ☀️ Светлая тема
-Для дневных сессий
+### ☀️ Light Theme
+For daytime sessions
 
 </td>
 <td align="center" width="50%">
 
-### 🌙 Тёмная тема
-Для ночного гринда
+### 🌙 Dark Theme
+For late-night grinding
 
 </td>
 </tr>
 </table>
 
-Переключайся одной кнопкой. Настройки сохраняются.
+Switch with a single button. Settings are saved.
 
 ---
 
-## 👥 СОЦИАЛЬНАЯ СЕТЬ
+## 👥 SOCIAL NETWORK
 
 <table>
 <tr>
 <td width="50%">
 
-### 🔍 Поиск друзей
-- Найди игроков по нику
-- Отправь заявку в друзья
-- Прими или отклони входящие
+### 🔍 Find Friends
+- Search for players by username
+- Send friend requests
+- Accept or decline incoming requests
 
 </td>
 <td width="50%">
 
-### 📰 Лента активности
-- Смотри чем заняты друзья
-- Вдохновляйся их прогрессом
-- Соревнуйся в продуктивности
+### 📰 Activity Feed
+- See what your friends are up to
+- Get inspired by their progress
+- Compete in productivity
 
 </td>
 </tr>
@@ -171,47 +171,47 @@ LVL 50  ██████████  ЛЕГЕНДА
 
 ---
 
-## 📸 МЕДИА В ЗАДАЧАХ
+## 📸 MEDIA IN TASKS
 
-Прикрепляй к задачам:
-- 🖼️ **Изображения:** PNG, JPG, GIF, WebP
-- 🎬 **Видео:** MP4, WebM, MOV
+Attach to your tasks:
+- 🖼️ **Images:** PNG, JPG, GIF, WebP
+- 🎬 **Videos:** MP4, WebM, MOV
 
-*Визуализируй прогресс. Делись с друзьями.*
+*Visualize your progress. Share with friends.*
 
 ---
 
-## 📑 ТРИ ВКЛАДКИ
+## 📑 THREE TABS
 
-| Вкладка | Содержимое |
+| Tab | Contents |
 |:-------:|------------|
-| **TODO** | Твои задачи и прогресс |
-| **SOCIAL** | Друзья и лента активности |
-| **HISTORY** | История действий и достижений |
+| **TODO** | Your tasks and progress |
+| **SOCIAL** | Friends and activity feed |
+| **HISTORY** | Action history and achievements |
 
 ---
 
-## 🚀 ЗАПУСК ЗА 60 СЕКУНД
+## 🚀 LAUNCH IN 60 SECONDS
 
-### Вариант 1: Локально (только веб)
+### Option 1: Locally (web only)
 
 ```bash
-# Клонируй
+# Clone
 git clone https://github.com/YOUR_USERNAME/todo-game.git
 cd todo-game
 
-# Установи
+# Install
 pip install flask flask-wtf bcrypt python-dotenv
 
-# Играй
+# Play
 python run.py
 ```
 
-Открой **http://localhost:5010** и создай аккаунт.
+Open **http://localhost:5010** and create an account.
 
-**Всё.** Никаких npm install на 10 минут. Никаких конфигов. Просто работает.
+**That's it.** No 10-minute npm install. No config files. It just works.
 
-### Вариант 2: Локально (веб + Telegram бот)
+### Option 2: Locally (web + Telegram bot)
 
 ```bash
 # Windows
@@ -224,95 +224,95 @@ chmod +x start-all.sh
 ./start-all.sh
 ```
 
-Запустит оба сервиса в отдельных окнах.
+Launches both services in separate windows.
 
-### Вариант 3: Docker (веб + Telegram бот)
+### Option 3: Docker (web + Telegram bot)
 
 ```bash
 docker-compose up -d --build
 ```
 
-Настройки в `.env`:
-- `SECRET_KEY` — секрет для сессий
-- `PORT` — порт (по умолчанию 5010)
-- `TELEGRAM_BOT_TOKEN` — токен бота от @BotFather
-- `API_URL` — URL API (для бота)
-- `ADMIN_TELEGRAM_ID` — Telegram ID админа
+Settings in `.env`:
+- `SECRET_KEY` — secret for sessions
+- `PORT` — port (default 5010)
+- `TELEGRAM_BOT_TOKEN` — bot token from @BotFather
+- `API_URL` — API URL (for the bot)
+- `ADMIN_TELEGRAM_ID` — admin's Telegram ID
 
 ---
 
-## 🤖 TELEGRAM БОТ
+## 🤖 TELEGRAM BOT
 
-Бот позволяет управлять задачами через Telegram.
+The bot lets you manage tasks via Telegram.
 
-### Быстрый старт
+### Quick Start
 
-1. **Создай бота:** Напиши @BotFather в Telegram, создай бота, получи токен
-2. **Настрой .env:** Добавь `TELEGRAM_BOT_TOKEN=your_token`
-3. **Запусти бота:**
+1. **Create a bot:** Message @BotFather on Telegram, create a bot, get the token
+2. **Configure .env:** Add `TELEGRAM_BOT_TOKEN=your_token`
+3. **Launch the bot:**
    ```bash
    cd BACKEND/TELEGRAM
    npm install
    node run.js
    ```
-4. **Напиши боту:** Отправь `/start` в Telegram
+4. **Message the bot:** Send `/start` in Telegram
 
-### Возможности бота
+### Bot Features
 
-- 🔑 Вход и регистрация в TODO GAME
-- 📝 Добавление задач
-- ✅ Выполнение задач
-- 🗑️ Удаление задач
-- ✏️ Переименование задач
-- 📋 Просмотр списка задач
+- 🔑 Login and registration in TODO GAME
+- 📝 Adding tasks
+- ✅ Completing tasks
+- 🗑️ Deleting tasks
+- ✏️ Renaming tasks
+- 📋 Viewing task list
 
-**Подробнее:** См. [BACKEND/TELEGRAM/README.md](BACKEND/TELEGRAM/README.md)
+**More details:** See [BACKEND/TELEGRAM/README.md](BACKEND/TELEGRAM/README.md)
 
 ---
 
-## 🔄 АВТО-ОБНОВЛЕНИЕ (CI/CD)
+## 🔄 AUTO-UPDATE (CI/CD)
 
-Сервер автоматически обновляется при каждом `git push`.
+The server updates automatically on every `git push`.
 
-### Настройка за 2 минуты
+### Setup in 2 Minutes
 
-1. **Настройте `.env`:**
+1. **Configure `.env`:**
    ```bash
    WEBHOOK_SECRET=your-super-secret-key
    REPO_URL=https://github.com/YOUR_USERNAME/todo-game.git
    ```
 
-2. **Настройте webhook на GitHub:**
+2. **Set up the webhook on GitHub:**
    - Settings → Webhooks → Add webhook
    - **Payload URL:** `https://your-server.com/webhook`
    - **Content type:** `application/json`
-   - **Secret:** ваш `WEBHOOK_SECRET`
+   - **Secret:** your `WEBHOOK_SECRET`
    - **Events:** Just the push event
 
-3. **Готово!** Теперь при `git push` сервер обновится автоматически.
+3. **Done!** Now on every `git push` the server will update automatically.
 
-**Подробнее:** См. [WEBHOOK_SETUP.md](WEBHOOK_SETUP.md)
-
----
-
-## 🛡️ БЕЗОПАСНОСТЬ
-
-- 🔐 Пароли хешируются через **bcrypt**
-- 🛡️ CSRF-защита на всех формах
-- 💾 Данные хранятся **локально** в SQLite
-- 🚫 Никакой телеметрии, никакого облака
-
-**Твои задачи — только твои.**
+**More details:** See [WEBHOOK_SETUP.md](WEBHOOK_SETUP.md)
 
 ---
 
-## 🧬 ПОД КАПОТОМ
+## 🛡️ SECURITY
+
+- 🔐 Passwords are hashed with **bcrypt**
+- 🛡️ CSRF protection on all forms
+- 💾 Data is stored **locally** in SQLite
+- 🚫 No telemetry, no cloud
+
+**Your tasks — yours only.**
+
+---
+
+## 🧬 UNDER THE HOOD
 
 <div align="center">
 
 | | |
 |:---:|:---:|
-| **Бэкенд** | **Фронтенд** |
+| **Backend** | **Frontend** |
 | Python 3.8+ | Vanilla JavaScript |
 | Flask | HTML5 + CSS3 |
 | SQLite3 | Web Audio API |
@@ -320,44 +320,44 @@ docker-compose up -d --build
 
 </div>
 
-**Минимализм:**
-- Нет React/Vue/Angular
-- Нет Webpack/Vite
-- Нет node_modules
-- ~3400 строк кода
+**Minimalism:**
+- No React/Vue/Angular
+- No Webpack/Vite
+- No node_modules
+- ~3400 lines of code
 
-*Быстро загружается. Быстро работает. Легко понять.*
+*Loads fast. Runs fast. Easy to understand.*
 
 ---
 
-## 🎮 КАК ИГРАТЬ
+## 🎮 HOW TO PLAY
 
 ```
-1. 📝 Добавь задачу           "Сделать отчёт"
-2. ✅ Выполни её              +27 XP!
-3. ⚡ Быстро добавь ещё       "Ответить на письма"
-4. ✅ Выполни за 5 секунд     +31 XP × 2 COMBO!
-5. 🔥 Продолжай серию         COMBO x3... x4... x5!
-6. 📈 Смотри как растёт XP    ████████░░ НОВЫЙ УРОВЕНЬ!
-7. 🏆 Получи достижение       🎉 "Начало комбо"!
-8. 🔁 Повторяй каждый день    📅 Streak +1
+1. 📝 Add a task              "Write the report"
+2. ✅ Complete it              +27 XP!
+3. ⚡ Quickly add another      "Reply to emails"
+4. ✅ Complete in 5 seconds    +31 XP × 2 COMBO!
+5. 🔥 Keep the streak going   COMBO x3... x4... x5!
+6. 📈 Watch your XP grow      ████████░░ NEW LEVEL!
+7. 🏆 Earn an achievement     🎉 "Combo Starter"!
+8. 🔁 Repeat every day        📅 Streak +1
 ```
 
 ---
 
 <div align="center">
 
-## ⭐ ПОНРАВИЛОСЬ?
+## ⭐ LIKED IT?
 
-**Поставь звезду** — это мотивирует развивать проект
+**Give it a star** — it motivates us to keep developing the project
 
 ---
 
-### 🐛 Баги и идеи → [Issues](../../issues)
+### 🐛 Bugs and ideas → [Issues](../../issues)
 
-### 🤝 Хочешь помочь? → [Pull Requests](../../pulls)
+### 🤝 Want to contribute? → [Pull Requests](../../pulls)
 
-### 📋 История версий → [VERSION.md](VERSION.md)
+### 📋 Version history → [VERSION.md](VERSION.md)
 
 ---
 
@@ -366,14 +366,14 @@ docker-compose up -d --build
 ```
 ╔═══════════════════════════════════════════════════╗
 ║                                                   ║
-║   "Геймификация не делает работу легче.          ║
-║    Она делает её интереснее."                    ║
+║   "Gamification doesn't make work easier.        ║
+║    It makes it more interesting."                ║
 ║                                                   ║
 ╚═══════════════════════════════════════════════════╝
 ```
 
 <br>
 
-**MIT License** | Сделано с 🎮 ☕ и желанием победить прокрастинацию
+**MIT License** | Made with 🎮 ☕ and a desire to beat procrastination
 
 </div>

@@ -1,12 +1,12 @@
 
 # RUN
 ┌──────────────────────┬───────────────────────────────────┐
-│ Сценарий             │ Способ                            │
+│ Scenario             │ Method                            │
 ├──────────────────────┼───────────────────────────────────┤
-│ Личное использование │ python run.py                  │
-│ Разработка           │ BACKEND/start-all.sh (видны логи обоих) │
-│ Production сервер    │ docker-compose up -d              │
-│ Только веб без бота  │ python run.py                  │
+│ Personal use         │ python run.py                  │
+│ Development          │ BACKEND/start-all.sh (logs visible) │
+│ Production server    │ docker-compose up -d              │
+│ Web only (no bot)    │ python run.py                  │
 └──────────────────────┴───────────────────────────────────┘
 docker compose up -d --build
 
@@ -55,3 +55,4 @@ v0.0.40 - server test 6
 v0.0.41 - improved documentation behavior
 v0.0.42 - improved configuration loading
 v0.0.43 - version update test 1
+v0.0.44 - changed to english version

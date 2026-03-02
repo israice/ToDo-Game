@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-    <title>ToDo Game - Вход</title>
+    <title>ToDo Game - Login</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>">
     <style>
         :root {
@@ -242,40 +242,40 @@
 
         <div class="card">
             <div class="tabs">
-                <button class="tab active" onclick="show('login')" type="button">Вход</button>
-                <button class="tab" onclick="show('register')" type="button">Регистрация</button>
+                <button class="tab active" onclick="show('login')" type="button">Login</button>
+                <button class="tab" onclick="show('register')" type="button">Register</button>
             </div>
 
             <div id="login" class="form active">
                 {% if error %}<div class="error">{{ error }}</div>{% endif %}
-                {% if register_error == "Пользователь уже существует" %}<div class="error">{{ register_error }}</div>{% endif %}
+                {% if register_error == "User already exists" %}<div class="error">{{ register_error }}</div>{% endif %}
                 <form method="post" action="/login">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <div class="input-group">
-                        <label for="login-username">Имя пользователя</label>
-                        <input id="login-username" name="username" type="text" placeholder="Введите имя пользователя" required autocomplete="username" autofocus>
+                        <label for="login-username">Username</label>
+                        <input id="login-username" name="username" type="text" placeholder="Enter username" required autocomplete="username" autofocus>
                     </div>
                     <div class="input-group">
-                        <label for="login-password">Пароль</label>
-                        <input id="login-password" name="password" type="password" placeholder="Введите пароль" required autocomplete="current-password">
+                        <label for="login-password">Password</label>
+                        <input id="login-password" name="password" type="password" placeholder="Enter password" required autocomplete="current-password">
                     </div>
-                    <button type="submit" class="submit-btn">Начать приключение</button>
+                    <button type="submit" class="submit-btn">Start adventure</button>
                 </form>
             </div>
 
             <div id="register" class="form">
-                {% if register_error and register_error != "Пользователь уже существует" %}<div class="error">{{ register_error }}</div>{% endif %}
+                {% if register_error and register_error != "User already exists" %}<div class="error">{{ register_error }}</div>{% endif %}
                 <form method="post" action="/register">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <div class="input-group">
-                        <label for="register-username">Имя пользователя</label>
-                        <input id="register-username" name="username" type="text" placeholder="Придумайте имя пользователя" required autocomplete="username">
+                        <label for="register-username">Username</label>
+                        <input id="register-username" name="username" type="text" placeholder="Choose a username" required autocomplete="username">
                     </div>
                     <div class="input-group">
-                        <label for="register-password">Пароль</label>
-                        <input id="register-password" name="password" type="password" placeholder="Придумайте пароль" required autocomplete="new-password">
+                        <label for="register-password">Password</label>
+                        <input id="register-password" name="password" type="password" placeholder="Choose a password" required autocomplete="new-password">
                     </div>
-                    <button type="submit" class="submit-btn">Создать аккаунт</button>
+                    <button type="submit" class="submit-btn">Create account</button>
                 </form>
             </div>
         </div>
@@ -288,7 +288,7 @@
             document.querySelector(`.tab:nth-child(${id === 'login' ? 1 : 2})`).classList.add('active');
             document.getElementById(id).querySelector('input[type="text"]').focus();
         }
-        {% if register_error and register_error != "Пользователь уже существует" %}show('register');{% endif %}
+        {% if register_error and register_error != "User already exists" %}show('register');{% endif %}
     </script>
 </body>
 </html>

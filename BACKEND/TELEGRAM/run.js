@@ -60,7 +60,7 @@ bot.command('stop', async (ctx) => {
   if (userId) {
     await api.closeUserSession(userId);
   }
-  ctx.reply('✅ Сервер остановлен пользователем');
+  ctx.reply('✅ Server stopped by user');
 });
 
 // === AUTH FLOW ===
@@ -166,7 +166,7 @@ bot.on('text', async (ctx) => {
         ctx.session = { action: null, step: null, authenticated: true };
       } else {
         if (result.alreadyInUse) {
-          ctx.reply('❌ Этот аккаунт уже используется другим пользователем', authKeyboard);
+          ctx.reply('❌ This account is already in use by another user', authKeyboard);
         } else {
           ctx.reply(config.telegram.messages.auth.login_failed, authKeyboard);
         }
@@ -182,11 +182,11 @@ bot.on('text', async (ctx) => {
         ctx.session = { action: null, step: null, authenticated: true };
       } else {
         if (result.alreadyInUse) {
-          ctx.reply('❌ Этот аккаунт уже используется другим пользователем', authKeyboard);
+          ctx.reply('❌ This account is already in use by another user', authKeyboard);
         } else if (result.alreadyExists) {
-          ctx.reply('❌ Пользователь с таким именем уже существует. Попробуйте другое имя или войдите.', authKeyboard);
+          ctx.reply('❌ A user with this name already exists. Try a different name or log in.', authKeyboard);
         } else {
-          ctx.reply(config.telegram.messages.auth.register_failed.replace('%s', result.error || 'Неизвестная ошибка'), authKeyboard);
+          ctx.reply(config.telegram.messages.auth.register_failed.replace('%s', result.error || 'Unknown error'), authKeyboard);
         }
         ctx.session = { action: null, step: null, authenticated: false };
       }
@@ -317,17 +317,17 @@ setTimeout(() => {
 console.log('API service ready. Use /stop to close all sessions.');
 
 process.once('SIGINT', async () => {
-  console.log('\n🛑 Остановка сервера пользователем (Ctrl+C)...');
+  console.log('\n🛑 Server stopped by user (Ctrl+C)...');
   await api.close();
   bot.stop('SIGINT');
-  console.log('✅ Сервер остановлен\n');
+  console.log('✅ Server stopped\n');
   process.exit(0);
 });
 
 process.once('SIGTERM', async () => {
-  console.log('\n🛑 Остановка сервера (SIGTERM)...');
+  console.log('\n🛑 Server stopping (SIGTERM)...');
   await api.close();
   bot.stop('SIGTERM');
-  console.log('✅ Сервер остановлен\n');
+  console.log('✅ Server stopped\n');
   process.exit(0);
 });

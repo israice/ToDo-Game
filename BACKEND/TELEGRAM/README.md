@@ -1,33 +1,33 @@
 # Telegram Bot for TODO GAME
 
-Telegram-бот для управления задачами в TODO GAME через прямое API.
+Telegram bot for managing tasks in TODO GAME via direct API.
 
-## 📋 Описание
+## 📋 Description
 
-Бот предоставляет интерфейс для управления задачами в TODO-приложении через Telegram. Использует прямое HTTP API вместо браузерной автоматизации.
+The bot provides an interface for managing tasks in the TODO application through Telegram. It uses direct HTTP API instead of browser automation.
 
-## 🔧 Возможности
+## 🔧 Features
 
-| Действие | Описание |
+| Action | Description |
 |----------|----------|
-| 🔑 Login | Вход в существующий аккаунт |
-| 📝 Registration | Создание нового аккаунта |
-| 📝 Добавить задание | Создание новой задачи |
-| 🗑️ Удалить задание | Удаление задачи по номеру |
-| ✏️ Переименовать | Изменение названия задачи |
-| ✅ Выполнить | Отметка задачи как выполненной |
-| 📋 Показать задачи | Просмотр списка задач |
+| 🔑 Login | Sign in to an existing account |
+| 📝 Registration | Create a new account |
+| 📝 Add task | Create a new task |
+| 🗑️ Delete task | Delete a task by number |
+| ✏️ Rename | Change the task name |
+| ✅ Complete | Mark a task as completed |
+| 📋 Show tasks | View the task list |
 
-## 🚀 Как это работает
+## 🚀 How it works
 
 ```
 ┌─────────────────────────────────────────┐
 │  Telegram Bot (run.js)                  │
-│  • Принимает команды от пользователя    │
-│  • Управляет сессиями (токены)          │
-│  • Вызывает API методы                  │
+│  • Receives commands from the user      │
+│  • Manages sessions (tokens)            │
+│  • Calls API methods                    │
 └─────────────────┬───────────────────────┘
-                  │ HTTP запросы
+                  │ HTTP requests
                   ↓
 ┌─────────────────────────────────────────┐
 │  TODO GAME API (run.py)              │
@@ -42,137 +42,137 @@ Telegram-бот для управления задачами в TODO GAME чер
 └─────────────────────────────────────────┘
 ```
 
-## 📦 Установка
+## 📦 Installation
 
-1. **Клонируйте репозиторий:**
+1. **Clone the repository:**
    ```bash
    git clone <repository-url>
    cd todo-game/BACKEND/TELEGRAM
    ```
 
-2. **Установите зависимости:**
+2. **Install dependencies:**
    ```bash
    npm install
    ```
 
-3. **Настройте переменные окружения:**
+3. **Set up environment variables:**
    ```bash
-   # Скопируйте пример
+   # Copy the example
    copy .env.example .env
 
-   # Отредактируйте .env и укажите:
-   TELEGRAM_BOT_TOKEN=ваш_токен_бота
+   # Edit .env and specify:
+   TELEGRAM_BOT_TOKEN=your_bot_token
    API_URL=https://todo.weforks.org
    ```
 
-## ▶️ Запуск
+## ▶️ Launch
 
 ```bash
 npm start
 ```
 
-После запуска бот будет ожидать команды в Telegram.
+After launching, the bot will wait for commands in Telegram.
 
-## 📱 Использование в Telegram
+## 📱 Usage in Telegram
 
-1. **Запуск бота:** Отправьте `/start`
-2. **Выберите действие** из меню кнопок
-3. **Следуйте инструкциям** бота:
-   - Для **входа** — введите username и пароль
-   - Для **регистрации** — введите новый username и пароль
-   - Для **управления задачами** — выберите действие и следуйте подсказкам
+1. **Start the bot:** Send `/start`
+2. **Choose an action** from the button menu
+3. **Follow the bot's instructions:**
+   - To **log in** — enter your username and password
+   - To **register** — enter a new username and password
+   - To **manage tasks** — choose an action and follow the prompts
 
-### Пример диалога
+### Example dialog
 
 ```
-Вы: /start
-Бот: Выберите действие:
+You: /start
+Bot: Choose an action:
      [🔑 Login] [📝 Registration]
 
-Вы: [нажали 🔑 Login]
-Бот: Введите ваше имя пользователя:
+You: [pressed 🔑 Login]
+Bot: Enter your username:
 
-Вы: myusername
-Бот: Введите пароль:
+You: myusername
+Bot: Enter your password:
 
-Вы: mypassword
-Бот: ✅ Успешный вход! Теперь вы можете управлять задачами.
-     [📝 Добавить задание] [🗑️ Удалить задание]
-     [✏️ Переименовать] [✅ Выполнить]
-     [📋 Показать задачи]
+You: mypassword
+Bot: ✅ Login successful! Now you can manage tasks.
+     [📝 Add task] [🗑️ Delete task]
+     [✏️ Rename] [✅ Complete]
+     [📋 Show tasks]
 
-Вы: [нажали 📋 Показать задачи]
-Бот: 📋 Загружаю список задач...
-Бот: 📝 Ваши задачи:
-     1. Купить молоко
-     2. Выгулять собаку
-     3. Сделать уборку
+You: [pressed 📋 Show tasks]
+Bot: 📋 Loading task list...
+Bot: 📝 Your tasks:
+     1. Buy milk
+     2. Walk the dog
+     3. Clean the house
 ```
 
-## 📁 Структура проекта
+## 📁 Project structure
 
 ```
 BACKEND/TELEGRAM/
-├── run.js              # Telegram бот (основной)
-├── browser.js          # API сервис (HTTP запросы)
-├── config.js           # Конфигурация
-├── package.json        # Зависимости
-├── .env                # Переменные окружения
-└── README.md           # Документация
+├── run.js              # Telegram bot (main)
+├── browser.js          # API service (HTTP requests)
+├── config.js           # Configuration
+├── package.json        # Dependencies
+├── .env                # Environment variables
+└── README.md           # Documentation
 ```
 
-## ⚙️ Конфигурация
+## ⚙️ Configuration
 
-### Переменные окружения (.env)
+### Environment variables (.env)
 
-| Переменная | Описание |
+| Variable | Description |
 |------------|----------|
-| `TELEGRAM_BOT_TOKEN` | Токен бота от @BotFather |
-| `API_URL` | URL TODO GAME API (по умолчанию: https://todo.weforks.org) |
-| `ADMIN_TELEGRAM_ID` | Telegram ID админов (через запятую) |
+| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
+| `API_URL` | TODO GAME API URL (default: https://todo.weforks.org) |
+| `ADMIN_TELEGRAM_ID` | Admin Telegram IDs (comma-separated) |
 
 ### config.js
 
 ```javascript
 module.exports = {
   telegram: {
-    adminIds: [...],         // ID админов
-    buttons: { ... },        // Названия кнопок
-    actions: { ... },        // Внутренние имена действий
-    messages: { ... }        // Сообщения бота
+    adminIds: [...],         // Admin IDs
+    buttons: { ... },        // Button labels
+    actions: { ... },        // Internal action names
+    messages: { ... }        // Bot messages
   },
   api: {
-    baseUrl: '...'           // URL API из .env
+    baseUrl: '...'           // API URL from .env
   }
 };
 ```
 
-## 🔍 Отладка
+## 🔍 Debugging
 
-Включите подробное логирование в консоли:
-- Сессии пользователей
-- Загруженные списки задач
-- Результаты выполнения API запросов
+Enable detailed console logging:
+- User sessions
+- Loaded task lists
+- API request execution results
 
-## 📝 Зависимости
+## 📝 Dependencies
 
-- [telegraf](https://telegraf.js.org/) — фреймворк для Telegram-ботов
-- [dotenv](https://github.com/motdotla/dotenv) — управление переменными окружения
+- [telegraf](https://telegraf.js.org/) — framework for Telegram bots
+- [dotenv](https://github.com/motdotla/dotenv) — environment variable management
 
-## ⚠️ Примечания
+## ⚠️ Notes
 
-- Бот работает с несколькими пользователями одновременно
-- Сессии хранятся в памяти (сбрасываются при перезапуске)
-- Каждый токен уникален и привязан к пользователю
-- Для работы требуется доступ к TODO GAME API
+- The bot works with multiple users simultaneously
+- Sessions are stored in memory (reset on restart)
+- Each token is unique and bound to a user
+- Access to the TODO GAME API is required for operation
 
-## 🔐 Безопасность
+## 🔐 Security
 
-- Токены генерируются через SHA-256
-- Токены хранятся в базе данных на сервере
-- Возможность отзыва токена через logout
-- Один аккаунт не может использоваться несколькими пользователями одновременно
+- Tokens are generated using SHA-256
+- Tokens are stored in the database on the server
+- Ability to revoke a token via logout
+- One account cannot be used by multiple users simultaneously
 
-## 📄 Лицензия
+## 📄 License
 
 MIT

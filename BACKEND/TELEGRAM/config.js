@@ -7,11 +7,11 @@ module.exports = {
     buttons: {
       login: '🔑 Login',
       register: '📝 Registration',
-      add_task: '📝 Добавить задание',
-      delete_task: '🗑️ Удалить задание',
-      rename_task: '✏️ Переименовать',
-      complete_task: '✅ Выполнить',
-      show_tasks: '📋 Показать задачи'
+      add_task: '📝 Add task',
+      delete_task: '🗑️ Delete task',
+      rename_task: '✏️ Rename',
+      complete_task: '✅ Complete',
+      show_tasks: '📋 Show tasks'
     },
     actions: {
       LOGIN: 'login',
@@ -24,33 +24,33 @@ module.exports = {
     },
     messages: {
       auth: {
-        start: 'Выберите действие:\nЕсли у вас уже есть аккаунт — нажмите Login, иначе — Registration',
-        login_prompt: 'Введите ваше имя пользователя:',
-        password_prompt: 'Введите пароль:',
-        login_success: '✅ Успешный вход! Теперь вы можете управлять задачами.',
-        login_failed: '❌ Неверное имя пользователя или пароль. Попробуйте снова.',
-        register_success: '✅ Регистрация успешна! Теперь вы можете войти.',
-        register_failed: '❌ Ошибка регистрации: %s',
-        register_username_prompt: 'Введите имя пользователя для регистрации:',
-        register_password_prompt: 'Введите пароль:',
-        rename_prompt: 'Введите новое имя для задачи:',
-        back_to_auth: '🔙 Вернуться к авторизации'
+        start: 'Choose an action:\nIf you already have an account — press Login, otherwise — Registration',
+        login_prompt: 'Enter your username:',
+        password_prompt: 'Enter your password:',
+        login_success: '✅ Login successful! You can now manage your tasks.',
+        login_failed: '❌ Invalid username or password. Please try again.',
+        register_success: '✅ Registration successful! You can now log in.',
+        register_failed: '❌ Registration error: %s',
+        register_username_prompt: 'Enter a username for registration:',
+        register_password_prompt: 'Enter a password:',
+        rename_prompt: 'Enter a new name for the task:',
+        back_to_auth: '🔙 Back to authentication'
       },
-      start: 'Выберите действие:',
+      start: 'Choose an action:',
       prompts: {
-        add_task: 'Введите текст для нового задания:'
+        add_task: 'Enter text for the new task:'
       },
-      no_action: 'Сначала выберите действие из меню:',
-      executing: '✅ Выполняю...',
-      loading_tasks: '📋 Загружаю список задач...',
-      no_tasks: '❌ Список задач пуст',
-      task_list: '📝 Ваши задачи:\n\n%s\n\nВведите номер:',
-      invalid_number: '❌ Неверный номер. Попробуйте снова:',
-      done: '✅ Готово!',
-      error: '❌ Ошибка: %s',
-      browser_closed: '❌ Пожалуйста, авторизуйтесь заново.',
-      server_restart: '🔄 Сервер перезапустился. Требуется авторизация.',
-      session_error: '❌ Ошибка сессии. Начните сначала: /start',
+      no_action: 'Please choose an action from the menu first:',
+      executing: '✅ Executing...',
+      loading_tasks: '📋 Loading task list...',
+      no_tasks: '❌ Task list is empty',
+      task_list: '📝 Your tasks:\n\n%s\n\nEnter a number:',
+      invalid_number: '❌ Invalid number. Please try again:',
+      done: '✅ Done!',
+      error: '❌ Error: %s',
+      browser_closed: '❌ Please log in again.',
+      server_restart: '🔄 Server restarted. Authentication required.',
+      session_error: '❌ Session error. Start over: /start',
       taskIndexOutOfRange: '✗ Task index %d out of range (total: %d)'
     }
   },

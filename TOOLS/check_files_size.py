@@ -16,11 +16,11 @@ EXCLUDED_DIRS = """
 EXCLUDED_EXTENSIONS = ".png .md .jpg".split()
 
 for path in ROOT_DIR.rglob("*"):
-    # пропускаем файлы внутри исключённых директорий
+    # skip files inside excluded directories
     if any(part in EXCLUDED_DIRS for part in path.parts):
         continue
 
-    # пропускаем файлы по расширению
+    # skip files by extension
     if path.suffix.lower() in EXCLUDED_EXTENSIONS:
         continue
 

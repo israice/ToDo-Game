@@ -1,6 +1,7 @@
 import os, math, uuid, random, hashlib, hmac, subprocess, sqlite3, logging, json
 import warnings
 from datetime import datetime, date
+from typing import Optional
 from contextlib import contextmanager
 
 from fastapi import FastAPI, Request, Response, Form, UploadFile, File, Depends, HTTPException, WebSocket, WebSocketDisconnect
@@ -109,7 +110,7 @@ class ConnectionManager:
             if not self.user_connections[user_id]:
                 del self.user_connections[user_id]
 
-    async def broadcast(self, user_id: int, event: str, data: dict, source_sid: str = None):
+    async def broadcast(self, user_id: int, event: str, data: dict, source_sid: Optional[str] = None):
         if user_id not in self.user_connections:
             return
         dead = []
@@ -141,7 +142,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-async def send_user_event(user_id, event_type, data, source_session_id=None):
+async def send_user_event(user_id: int, event_type: str, data: dict, source_session_id: Optional[str] = None):
     await manager.broadcast(user_id, event_type, data, source_session_id)
 
 # ============== DB Helpers ==============
@@ -211,12 +212,12 @@ def init_db():
 def get_authenticated_user(request: Request) -> int:
     username = request.session.get('user')
     if not username:
-        raise HTTPException(status_code=401, detail='Не авторизован')
+        raise HTTPException(status_code=401, detail='Not authorized')
     with get_db() as conn:
         user = conn.execute('SELECT id FROM users WHERE username = ?', (username,)).fetchone()
         if not user:
             request.session.pop('user', None)
-            raise HTTPException(status_code=401, detail='Не авторизован')
+            raise HTTPException(status_code=401, detail='Not authorized')
         return user['id']
 
 async def get_token_authenticated_user(request: Request) -> int:
@@ -319,7 +320,7 @@ async def login(request: Request, username: str = Form(...), password: str = For
     if not validate_csrf_token(csrf_token):
         return templates.TemplateResponse('login.html', {
             'request': request,
-            'error': 'Недействительный запрос',
+            'error': 'Invalid request',
             'register_error': None,
             'csrf_token': generate_csrf_token()
         })
@@ -330,7 +331,7 @@ async def login(request: Request, username: str = Form(...), password: str = For
         return RedirectResponse('/', status_code=303)
     return templates.TemplateResponse('login.html', {
         'request': request,
-        'error': 'Неверные учётные данные',
+        'error': 'Invalid credentials',
         'register_error': None,
         'csrf_token': generate_csrf_token()
     })
@@ -338,7 +339,7 @@ async def login(request: Request, username: str = Form(...), password: str = For
 @app.post('/register')
 async def register(request: Request, username: str = Form(...), password: str = Form(...), csrf_token: str = Form('')):
     if not validate_csrf_token(csrf_token):
-        request.session['register_error'] = 'Недействительный запрос'
+        request.session['register_error'] = 'Invalid request'
         return RedirectResponse('/', status_code=303)
     with get_db() as conn:
         try:
@@ -350,7 +351,7 @@ async def register(request: Request, username: str = Form(...), password: str = 
             request.session['user'] = username
             return RedirectResponse('/', status_code=303)
         except Exception:
-            request.session['register_error'] = 'Пользователь уже существует'
+            request.session['register_error'] = 'User already exists'
             return RedirectResponse('/', status_code=303)
 
 @app.get('/logout')
@@ -474,7 +475,7 @@ async def api_update_settings(request: Request, user_id: int = Depends(get_authe
 async def api_create_task(request: Request, user_id: int = Depends(get_authenticated_user)):
     data = await request.json()
     if not data or not data.get('text', '').strip():
-        return JSONResponse({'error': 'Текст задачи обязателен'}, status_code=400)
+        return JSONResponse({'error': 'Task text is required'}, status_code=400)
     task_id = f"{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
     xp = random.randint(20, 35)
 
@@ -501,7 +502,7 @@ async def api_create_task(request: Request, user_id: int = Depends(get_authentic
 async def api_update_task(task_id: str, request: Request, user_id: int = Depends(get_authenticated_user)):
     data = await request.json()
     if not data or not data.get('text', '').strip():
-        return JSONResponse({'error': 'Текст задачи обязателен'}, status_code=400)
+        return JSONResponse({'error': 'Task text is required'}, status_code=400)
     with get_db() as conn:
         conn.execute('UPDATE tasks SET text = ? WHERE id = ? AND user_id = ?', (data['text'].strip(), task_id, user_id))
         conn.commit()
@@ -523,7 +524,7 @@ async def api_complete_task(task_id: str, request: Request, user_id: int = Depen
     with get_db() as conn:
         task = conn.execute('SELECT * FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
         if not task:
-            return JSONResponse({'error': 'Задача не найдена'}, status_code=404)
+            return JSONResponse({'error': 'Task not found'}, status_code=404)
 
         progress = get_or_create_progress(conn, user_id)
         try:
@@ -712,14 +713,14 @@ async def api_upload_media(task_id: str, file: UploadFile = File(...), user_id: 
     with get_db() as conn:
         task = conn.execute('SELECT id FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
         if not task:
-            return JSONResponse({'error': 'Задача не найдена'}, status_code=404)
+            return JSONResponse({'error': 'Task not found'}, status_code=404)
 
         if not file.filename:
-            return JSONResponse({'error': 'Файл не выбран'}, status_code=400)
+            return JSONResponse({'error': 'No file selected'}, status_code=400)
 
         ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
         if ext not in ALLOWED_EXTENSIONS:
-            return JSONResponse({'error': 'Недопустимый формат'}, status_code=400)
+            return JSONResponse({'error': 'Invalid format'}, status_code=400)
 
         media_type = 'video' if ext in {'mp4', 'webm', 'mov'} else 'image'
         filename = f"{task_id}_{uuid.uuid4().hex[:8]}.{ext}"
@@ -749,7 +750,7 @@ async def api_delete_media(task_id: str, user_id: int = Depends(get_authenticate
         media = conn.execute('SELECT filename FROM task_media WHERE task_id = ? AND user_id = ?',
                              (task_id, user_id)).fetchone()
         if not media:
-            return JSONResponse({'error': 'Медиа не найдено'}, status_code=404)
+            return JSONResponse({'error': 'Media not found'}, status_code=404)
 
         filepath = os.path.join(UPLOAD_FOLDER, media['filename'])
         if os.path.exists(filepath):
@@ -861,12 +862,12 @@ async def api_send_friend_request(request: Request, user_id: int = Depends(get_a
     friend_id = data.get('user_id')
 
     if not friend_id or friend_id == user_id:
-        return JSONResponse({'error': 'Некорректный запрос'}, status_code=400)
+        return JSONResponse({'error': 'Invalid request'}, status_code=400)
 
     with get_db() as conn:
         friend = conn.execute('SELECT id FROM users WHERE id = ?', (friend_id,)).fetchone()
         if not friend:
-            return JSONResponse({'error': 'Пользователь не найден'}, status_code=404)
+            return JSONResponse({'error': 'User not found'}, status_code=404)
 
         existing = conn.execute('''
             SELECT status FROM friendships
@@ -875,12 +876,12 @@ async def api_send_friend_request(request: Request, user_id: int = Depends(get_a
 
         if existing:
             if existing['status'] == 'accepted':
-                return JSONResponse({'error': 'Вы уже друзья'}, status_code=400)
-            return JSONResponse({'error': 'Заявка уже существует'}, status_code=400)
+                return JSONResponse({'error': 'Already friends'}, status_code=400)
+            return JSONResponse({'error': 'Request already exists'}, status_code=400)
 
         conn.execute('INSERT INTO friendships (user_id, friend_id) VALUES (?, ?)', (user_id, friend_id))
         conn.commit()
-    return JSONResponse({'success': True, 'message': 'Заявка отправлена'})
+    return JSONResponse({'success': True, 'message': 'Request sent'})
 
 @app.post('/api/friends/respond')
 async def api_respond_friend_request(request: Request, user_id: int = Depends(get_authenticated_user)):
@@ -889,7 +890,7 @@ async def api_respond_friend_request(request: Request, user_id: int = Depends(ge
     action = data.get('action')
 
     if action not in ('accept', 'reject'):
-        return JSONResponse({'error': 'Некорректное действие'}, status_code=400)
+        return JSONResponse({'error': 'Invalid action'}, status_code=400)
 
     with get_db() as conn:
         request_row = conn.execute('''
@@ -897,13 +898,13 @@ async def api_respond_friend_request(request: Request, user_id: int = Depends(ge
         ''', (request_id, user_id)).fetchone()
 
         if not request_row:
-            return JSONResponse({'error': 'Заявка не найдена'}, status_code=404)
+            return JSONResponse({'error': 'Request not found'}, status_code=404)
 
         new_status = 'accepted' if action == 'accept' else 'rejected'
         conn.execute('UPDATE friendships SET status = ? WHERE id = ?', (new_status, request_id))
         conn.commit()
 
-    message = 'Заявка принята' if action == 'accept' else 'Заявка отклонена'
+    message = 'Request accepted' if action == 'accept' else 'Request declined'
     return JSONResponse({'success': True, 'message': message})
 
 @app.delete('/api/friends/request/{request_id}')
@@ -915,7 +916,7 @@ async def api_cancel_friend_request(request_id: int, user_id: int = Depends(get_
         conn.commit()
 
         if result.rowcount == 0:
-            return JSONResponse({'error': 'Заявка не найдена'}, status_code=404)
+            return JSONResponse({'error': 'Request not found'}, status_code=404)
     return JSONResponse({'success': True})
 
 @app.delete('/api/friends/{friend_id}')
@@ -929,7 +930,7 @@ async def api_remove_friend(friend_id: int, user_id: int = Depends(get_authentic
         conn.commit()
 
         if result.rowcount == 0:
-            return JSONResponse({'error': 'Пользователь не в друзьях'}, status_code=404)
+            return JSONResponse({'error': 'User is not a friend'}, status_code=404)
     return JSONResponse({'success': True})
 
 @app.get('/api/friends/feed')

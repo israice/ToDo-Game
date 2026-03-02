@@ -60,18 +60,18 @@ function checkIfMobile() {
 
 // ========== ACHIEVEMENTS ==========
 const ACHIEVEMENTS = [
-  ['firstQuest', 'Первые шаги', 'Выполни свой первый квест', '&#127941;'],
-  ['fiveQuests', 'Путешественник', 'Выполни 5 квестов', '&#9876;'],
-  ['tenQuests', 'Ветеран', 'Выполни 10 квестов', '&#128737;'],
-  ['twentyFiveQuests', 'Герой', 'Выполни 25 квестов', '&#129409;'],
-  ['fiftyQuests', 'Легенда', 'Выполни 50 квестов', '&#128081;'],
-  ['combo3', 'Начало комбо', 'Достигни комбо x3', '&#128293;'],
-  ['combo5', 'В огне!', 'Достигни комбо x5', '&#9889;'],
-  ['combo10', 'Неудержимый', 'Достигни комбо x10', '&#127775;'],
-  ['level5', 'Восходящая звезда', 'Достигни 5 уровня', '&#11088;'],
-  ['level10', 'Мастер', 'Достигни 10 уровня', '&#128142;'],
-  ['streak7', 'Воин недели', 'Поддерживай серию 7 дней', '&#128170;'],
-  ['streak30', 'Мастер месяца', 'Поддерживай серию 30 дней', '&#127942;'],
+  ['firstQuest', 'First Steps', 'Complete your first quest', '&#127941;'],
+  ['fiveQuests', 'Traveler', 'Complete 5 quests', '&#9876;'],
+  ['tenQuests', 'Veteran', 'Complete 10 quests', '&#128737;'],
+  ['twentyFiveQuests', 'Hero', 'Complete 25 quests', '&#129409;'],
+  ['fiftyQuests', 'Legend', 'Complete 50 quests', '&#128081;'],
+  ['combo3', 'Combo Starter', 'Reach combo x3', '&#128293;'],
+  ['combo5', 'On Fire!', 'Reach combo x5', '&#9889;'],
+  ['combo10', 'Unstoppable', 'Reach combo x10', '&#127775;'],
+  ['level5', 'Rising Star', 'Reach level 5', '&#11088;'],
+  ['level10', 'Master', 'Reach level 10', '&#128142;'],
+  ['streak7', 'Weekly Warrior', 'Maintain a 7-day streak', '&#128170;'],
+  ['streak30', 'Monthly Master', 'Maintain a 30-day streak', '&#127942;'],
 ].map(([id, name, desc, icon]) => ({ id, name, desc, icon }));
 
 // ========== API HELPERS ==========
@@ -142,7 +142,7 @@ function updateConnectionStatus(connected) {
   if (connected) {
     connectionIndicator.style.background = '#00d9a5';
     connectionIndicator.style.color = '#000';
-    connectionIndicator.textContent = '● Онлайн';
+    connectionIndicator.textContent = '● Online';
     connectionIndicator.style.opacity = '0';
     setTimeout(() => {
       if (connectionIndicator) connectionIndicator.style.opacity = '0';
@@ -150,7 +150,7 @@ function updateConnectionStatus(connected) {
   } else {
     connectionIndicator.style.background = '#e74c3c';
     connectionIndicator.style.color = '#fff';
-    connectionIndicator.textContent = '● Нет соединения...';
+    connectionIndicator.textContent = '● No connection...';
     connectionIndicator.style.opacity = '1';
   }
 }
@@ -175,10 +175,10 @@ function showServerRestartIndicator() {
   const updateCountdown = () => {
     const countdownEl = document.getElementById('restart-countdown');
     if (countdownEl) {
-      countdownEl.textContent = `Перезагрузка через ${countdown} сек...`;
+      countdownEl.textContent = `Reloading in ${countdown} sec...`;
       countdown--;
       if (countdown < 0) {
-        countdownEl.textContent = 'Загрузка...';
+        countdownEl.textContent = 'Loading...';
       }
     }
   };
@@ -200,9 +200,9 @@ function showServerRestartIndicator() {
       animation: slideIn 0.3s ease-out;
     ">
       <div style="font-size: 48px; margin-bottom: 15px; animation: spin 1s linear infinite;">🔄</div>
-      <div style="font-size: 18px; font-weight: 600; margin-bottom: 10px;">Сервер обновляется</div>
-      <div style="font-size: 14px; opacity: 0.9;">Загружаем новую версию...</div>
-      <div id="restart-countdown" style="margin-top: 20px; font-size: 12px; opacity: 0.7;">Перезагрузка через ${countdown} сек...</div>
+      <div style="font-size: 18px; font-weight: 600; margin-bottom: 10px;">Server is updating</div>
+      <div style="font-size: 14px; opacity: 0.9;">Loading new version...</div>
+      <div id="restart-countdown" style="margin-top: 20px; font-size: 12px; opacity: 0.7;">Reloading in ${countdown} sec...</div>
     </div>
     <style>
       @keyframes slideIn {
@@ -455,10 +455,10 @@ function renderTasks() {
 
     li.innerHTML = `
       <span class="task-media ${hasImageClass}">${mediaHtml}</span>
-      <label class="task-checkbox"><input type="checkbox" aria-label="Выполнить квест"><span class="checkbox-custom"></span></label>
+      <label class="task-checkbox"><input type="checkbox" aria-label="Complete quest"><span class="checkbox-custom"></span></label>
       <span class="task-text">${esc(task.text)}</span>
       <span class="task-xp">+${task.xp} XP</span>
-      <button class="task-delete" aria-label="Удалить квест">&#128465;</button>`;
+      <button class="task-delete" aria-label="Delete quest">&#128465;</button>`;
 
     li.querySelector('input').onchange = () => completeTask(task.id, li);
     li.querySelector('.task-delete').onclick = () => deleteTask(task.id, li);
@@ -515,15 +515,21 @@ async function addTask(text) {
   if (result && result.id) {
     // Mark as pending to avoid duplicate from WebSocket
     pendingTasks.add(result.id);
-    
+
+    // Skip if WebSocket already added this task (race condition)
+    if (state.tasks.find(t => t.id === result.id)) {
+      setTimeout(() => pendingTasks.delete(result.id), 3000);
+      return;
+    }
+
     state.tasks.unshift({ id: result.id, text: result.text, xp: result.xp });
 
-    // +3 XP за создание задачи
+    // +3 XP for creating a task
     if (result.xpEarned) {
       state.level = result.level;
       state.xp = result.currentXp;
       state.xpMax = result.xpMax;
-      addToHistory('Создание задачи', result.xpEarned);
+      addToHistory('Task created', result.xpEarned);
       if (result.leveledUp) showPopup('levelup');
     }
 
@@ -532,7 +538,7 @@ async function addTask(text) {
     playSound('add');
     
     // Clear pending after short delay
-    setTimeout(() => pendingTasks.delete(result.id), 1000);
+    setTimeout(() => pendingTasks.delete(result.id), 3000);
   }
 }
 
@@ -562,7 +568,7 @@ async function completeTask(id, el) {
       state.combo = result.combo;
 
       // Add to history
-      addToHistory('Выполнение задачи', result.xpEarned);
+      addToHistory('Task completed', result.xpEarned);
 
       // Show achievements
       if (result.newAchievements && result.newAchievements.length > 0) {
@@ -638,7 +644,7 @@ async function toggleSetting(key, transform = v => !v) {
   if (state.sound) playSound('add');
 }
 $('sound-toggle').onclick = () => toggleSetting('sound');
-$('version-btn').onclick = () => alert('Скоро будет!');
+$('version-btn').onclick = () => alert('Coming soon!');
 
 document.addEventListener('click', initAudio, { once: true });
 document.addEventListener('keydown', initAudio, { once: true });
@@ -796,20 +802,20 @@ function renderSearchResults(users) {
   empty?.classList.remove('show');
   container.innerHTML = users.map(user => {
     let btnClass = 'add-friend-btn';
-    let btnText = 'Добавить';
+    let btnText = 'Add';
     let btnDisabled = '';
 
     if (user.friendship_status === 'friends') {
       btnClass += ' disabled';
-      btnText = 'В друзьях';
+      btnText = 'Friends';
       btnDisabled = 'disabled';
     } else if (user.friendship_status === 'pending_sent') {
       btnClass += ' pending';
-      btnText = 'Ожидает';
+      btnText = 'Pending';
       btnDisabled = 'disabled';
     } else if (user.friendship_status === 'pending_received') {
       btnClass += ' accept';
-      btnText = 'Принять';
+      btnText = 'Accept';
     }
 
     return `
@@ -817,7 +823,7 @@ function renderSearchResults(users) {
         <div class="social-avatar">${esc(user.avatar_letter)}</div>
         <div class="user-info">
           <span class="user-name">${esc(user.username)}</span>
-          <span class="user-level">Уровень ${user.level}</span>
+          <span class="user-level">Level ${user.level}</span>
         </div>
         <button class="${btnClass}" data-user-id="${user.id}" data-status="${user.friendship_status || ''}" ${btnDisabled}>
           ${btnText}
@@ -839,7 +845,7 @@ function renderSearchResults(users) {
           await respondToRequest(req.id, 'accept');
           btn.classList.remove('accept');
           btn.classList.add('disabled');
-          btn.textContent = 'В друзьях';
+          btn.textContent = 'Friends';
           btn.disabled = true;
         }
       } else {
@@ -847,7 +853,7 @@ function renderSearchResults(users) {
         const result = await sendFriendRequest(userId);
         if (result && result.success) {
           btn.classList.add('pending');
-          btn.textContent = 'Ожидает';
+          btn.textContent = 'Pending';
           btn.disabled = true;
         }
       }
@@ -878,8 +884,8 @@ async function loadFriendsData() {
           <span class="request-time">${formatRelativeTime(req.created_at)}</span>
         </div>
         <div class="request-actions">
-          <button class="accept-btn" title="Принять">&#10004;</button>
-          <button class="reject-btn" title="Отклонить">&#10006;</button>
+          <button class="accept-btn" title="Accept">&#10004;</button>
+          <button class="reject-btn" title="Decline">&#10006;</button>
         </div>
       </div>`).join('');
 
@@ -914,9 +920,9 @@ async function loadFriendsData() {
         <div class="social-avatar">${esc(req.avatar_letter)}</div>
         <div class="request-info">
           <span class="user-name">${esc(req.username)}</span>
-          <span class="request-status">Ожидает ответа</span>
+          <span class="request-status">Awaiting response</span>
         </div>
-        <button class="cancel-btn" title="Отменить">&#10006;</button>
+        <button class="cancel-btn" title="Cancel">&#10006;</button>
       </div>`).join('');
 
     // Add handlers
@@ -970,11 +976,11 @@ function renderFriendsFeed(feed, append = false) {
   const html = feed.map(item => {
     let actionText = '';
     if (item.activity_type === 'task_completed') {
-      actionText = `выполнил задание: "${esc(item.task_text || '')}"`;
+      actionText = `completed task: "${esc(item.task_text || '')}"`;
     } else if (item.activity_type === 'achievement') {
-      actionText = 'получил достижение';
+      actionText = 'earned an achievement';
     } else if (item.activity_type === 'level_up') {
-      actionText = 'повысил уровень';
+      actionText = 'leveled up';
     }
 
     let mediaHtml = '';
@@ -1023,10 +1029,10 @@ function formatRelativeTime(timestamp) {
   const diffHours = Math.floor(diffMs / 3600000);
   const diffDays = Math.floor(diffMs / 86400000);
 
-  if (diffMins < 1) return 'только что';
-  if (diffMins < 60) return `${diffMins} мин. назад`;
-  if (diffHours < 24) return `${diffHours} ч. назад`;
-  if (diffDays < 7) return `${diffDays} дн. назад`;
+  if (diffMins < 1) return 'just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
   return formatTime(timestamp);
 }
 
@@ -1097,8 +1103,8 @@ function openMediaPopup(taskId) {
 
   if (media) {
     preview.innerHTML = media.type === 'image'
-      ? `<img src="${media.url}" alt="Media"><button class="delete-media-btn" onclick="deleteMedia()">🗑️ Удалить</button>`
-      : `<video src="${media.url}" controls></video><button class="delete-media-btn" onclick="deleteMedia()">🗑️ Удалить</button>`;
+      ? `<img src="${media.url}" alt="Media"><button class="delete-media-btn" onclick="deleteMedia()">🗑️ Delete</button>`
+      : `<video src="${media.url}" controls></video><button class="delete-media-btn" onclick="deleteMedia()">🗑️ Delete</button>`;
     preview.classList.add('has-media');
   } else {
     preview.innerHTML = '';
@@ -1157,14 +1163,14 @@ async function startCamera(forVideo = false) {
     cameraView.dataset.mode = forVideo ? 'video' : 'photo';
 
     if (forVideo) {
-      captureBtn.textContent = '🔴 Записать';
+      captureBtn.textContent = '🔴 Record';
       captureBtn.onclick = startVideoRecording;
     } else {
-      captureBtn.textContent = '📸 Снять';
+      captureBtn.textContent = '📸 Capture';
       captureBtn.onclick = capturePhoto;
     }
   } catch (err) {
-    alert('Не удалось получить доступ к камере');
+    alert('Could not access the camera');
     console.error(err);
   }
 }
@@ -1206,7 +1212,7 @@ function startVideoRecording() {
   };
 
   mediaRecorder.start();
-  $('btn-camera-capture').textContent = '⏹️ Стоп';
+  $('btn-camera-capture').textContent = '⏹️ Stop';
   $('btn-camera-capture').onclick = stopVideoRecording;
 }
 
