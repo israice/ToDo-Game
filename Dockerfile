@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     && curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-29.2.1.tgz | \
     tar -xz -C /usr/local/bin/ --strip-components=1 docker/docker \
-    && curl -fsSL "https://github.com/bitwarden/sdk-sm/releases/download/bws-v1.1.0/bws-x86_64-unknown-linux-gnu-1.1.0.zip" \
+    && curl -fsSL "https://github.com/bitwarden/sdk-sm/releases/download/bws-v2.0.0/bws-x86_64-unknown-linux-gnu-2.0.0.zip" \
     -o /tmp/bws.zip && unzip /tmp/bws.zip -d /usr/local/bin/ && chmod +x /usr/local/bin/bws && rm /tmp/bws.zip \
     && rm -rf /var/lib/apt/lists/*
 

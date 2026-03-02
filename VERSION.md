@@ -48,3 +48,4 @@ v0.0.33 - test 2
 v0.0.34 - changed to FastAPI and Bitwarden support
 v0.0.35 - server test 1
 v0.0.36 - server test 2
+v0.0.37 - server test 3
