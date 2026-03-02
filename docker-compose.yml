@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     build: .
     ports:
-      - "${PORT:-5000}:5000"
+      - "${PORT:-5010}:5000"
     volumes:
       - app_data:/app/DATA
       - pip_cache:/root/.cache/pip
