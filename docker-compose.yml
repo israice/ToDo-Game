@@ -32,7 +32,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
-    entrypoint: ["/bin/sh", "-c", "if [ -z \"$REPO_URL\" ]; then echo 'ERROR: REPO_URL is not set. Create .env file with REPO_URL=https://github.com/username/repo.git' && exit 1; fi; BRANCH=${BRANCH:-master}; echo '🔄 Fetching latest code...'; if [ -d /app/.git ]; then cd /app && git fetch origin && git reset --hard origin/$BRANCH && echo '✓ Code updated'; else rm -rf /app/* /app/.[!.]* 2>/dev/null || true; git clone --branch $BRANCH --single-branch $REPO_URL /app && echo '✓ Code cloned'; fi && echo '📦 Installing dependencies...' && pip install --no-cache-dir -r requirements.txt 2>/dev/null && echo '✓ Dependencies installed' && echo '🚀 Starting server...' && exec uvicorn run:app --host 0.0.0.0 --port 5000 --workers 2 --proxy-headers --forwarded-allow-ips '*' --log-level info"]
+    entrypoint: ["/bin/sh", "-c", "if [ -z \"$$REPO_URL\" ]; then echo 'ERROR: REPO_URL is not set. Create .env file with REPO_URL=https://github.com/username/repo.git' && exit 1; fi; BRANCH=$${BRANCH:-master}; echo '🔄 Fetching latest code...'; if [ -d /app/.git ]; then cd /app && git fetch origin && git reset --hard origin/$$BRANCH && echo '✓ Code updated'; else rm -rf /app/* /app/.[!.]* 2>/dev/null || true; git clone --branch $$BRANCH --single-branch $$REPO_URL /app && echo '✓ Code cloned'; fi && echo '📦 Installing dependencies...' && pip install --no-cache-dir -r requirements.txt 2>/dev/null && echo '✓ Dependencies installed' && echo '🚀 Starting server...' && exec uvicorn run:app --host 0.0.0.0 --port 5000 --workers 2 --proxy-headers --forwarded-allow-ips '*' --log-level info"]
 
   telegram-bot:
     container_name: todo-telegram-bot
