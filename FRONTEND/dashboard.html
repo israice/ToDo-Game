@@ -30,6 +30,20 @@
                         <span class="xp-text"><span id="xp">0</span>/<span id="xp-max">100</span></span>
                     </div>
                 </div>
+                <div class="stats-mini">
+                    <div class="stat-item" aria-label="Completed quests">
+                        <span class="stat-icon" aria-hidden="true">&#9989;</span>
+                        <span id="tasks-completed">0</span>
+                    </div>
+                    <div class="stat-item" aria-label="Daily streak">
+                        <span class="stat-icon" aria-hidden="true">&#128293;</span>
+                        <span id="streak-count">0</span>
+                    </div>
+                    <div class="stat-item" aria-label="Achievements">
+                        <span class="stat-icon" aria-hidden="true">&#127942;</span>
+                        <span id="achievements-count">0</span>
+                    </div>
+                </div>
                 <!-- Settings button with dropdown -->
                 <div class="settings-wrapper">
                     <button class="settings-btn" id="settings-toggle" aria-label="User">
@@ -67,21 +81,6 @@
             </div>
 
             <div class="header-right">
-                <div class="stats-mini">
-                    <div class="stat-item" aria-label="Completed quests">
-                        <span class="stat-icon" aria-hidden="true">&#9989;</span>
-                        <span id="tasks-completed">0</span>
-                    </div>
-                    <div class="stat-item" aria-label="Daily streak">
-                        <span class="stat-icon" aria-hidden="true">&#128293;</span>
-                        <span id="streak-count">0</span>
-                    </div>
-                    <div class="stat-item" aria-label="Achievements">
-                        <span class="stat-icon" aria-hidden="true">&#127942;</span>
-                        <span id="achievements-count">0</span>
-                    </div>
-                </div>
-
                 <!-- Combo indicator -->
                 <div class="combo-container" id="combo-container">
                     <span class="combo-fire">&#128293;</span>
@@ -131,11 +130,7 @@
 
                 <!-- Tasks list -->
                 <div class="tasks-section">
-                    <h2 class="section-title">
-                        <span class="title-icon">&#128221;</span>
-                        Active Quests
-                        <span class="task-count" id="task-count">(0)</span>
-                    </h2>
+
 
                     <div class="skeleton-loader" id="skeleton-loader">
                         <div class="skeleton-task"></div>
@@ -143,6 +138,15 @@
                         <div class="skeleton-task"></div>
                     </div>
 
+                    <div class="tasks-header" id="tasks-header">
+                        <span class="th-media"></span>
+                        <span class="th-check"></span>
+                        <input type="text" class="th-search" id="task-search" placeholder="Search..." autocomplete="off">
+                        <span class="th-xp">XP</span>
+                        <span class="th-date">Start</span>
+                        <span class="th-date">Deadline</span>
+                        <span class="th-delete"></span>
+                    </div>
                     <ul class="tasks-list" id="tasks-list" role="list" aria-live="polite">
                         <!-- Tasks will be rendered here -->
                     </ul>
@@ -235,6 +239,7 @@
                 <div class="levelup-stars">&#10024; &#10024; &#10024;</div>
                 <div class="levelup-title">LEVEL UP!</div>
                 <div class="levelup-level">Level <span id="new-level">2</span></div>
+                <div class="levelup-achievements" id="levelup-achievements"></div>
             </div>
         </div>
 

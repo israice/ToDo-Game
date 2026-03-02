@@ -64,6 +64,7 @@ BRANCH = os.environ.get("BRANCH", DEFAULT_BRANCH)
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'DATA', 'UPLOADS')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4', 'webm', 'mov'}
+MAX_TASK_TEXT_LENGTH = 500
 
 # CSRF
 csrf_serializer = URLSafeTimedSerializer(SECRET_KEY)
@@ -77,6 +78,9 @@ def validate_csrf_token(token):
         return True
     except Exception:
         return False
+
+def error_response(message: str, status_code: int = 400) -> JSONResponse:
+    return JSONResponse({'success': False, 'error': message}, status_code=status_code)
 
 # Achievements
 ACHIEVEMENTS = [
@@ -144,6 +148,49 @@ manager = ConnectionManager()
 
 async def send_user_event(user_id: int, event_type: str, data: dict, source_session_id: Optional[str] = None):
     await manager.broadcast(user_id, event_type, data, source_session_id)
+
+# ============== File Watcher (debug mode only) ==============
+
+if APP_DEBUG:
+    import asyncio
+
+    _watched_mtimes: dict[str, float] = {}
+    WATCH_PATHS = ['FRONTEND', 'BACKEND', 'run.py', 'SETTINGS.py']
+    WATCH_EXTENSIONS = {'.py', '.js', '.css', '.html'}
+
+    def _collect_files() -> dict[str, float]:
+        result = {}
+        base = os.path.dirname(__file__)
+        for p in WATCH_PATHS:
+            full = os.path.join(base, p)
+            if os.path.isfile(full):
+                result[full] = os.path.getmtime(full)
+            elif os.path.isdir(full):
+                for root, _, files in os.walk(full):
+                    for f in files:
+                        if os.path.splitext(f)[1] in WATCH_EXTENSIONS:
+                            fp = os.path.join(root, f)
+                            result[fp] = os.path.getmtime(fp)
+        return result
+
+    async def _file_watcher():
+        global _watched_mtimes
+        _watched_mtimes = _collect_files()
+        while True:
+            await asyncio.sleep(5)
+            current = _collect_files()
+            changed = [f for f in current if current[f] != _watched_mtimes.get(f)]
+            changed += [f for f in _watched_mtimes if f not in current]
+            if changed:
+                _watched_mtimes = current
+                css_only = all(f.endswith('.css') for f in changed)
+                change_type = 'css' if css_only else 'reload'
+                logger.info(f'File changes detected ({change_type}): {[os.path.basename(f) for f in changed]}')
+                await manager.broadcast_all('files_changed', {'type': change_type})
+
+    @app.on_event('startup')
+    async def start_file_watcher():
+        asyncio.create_task(_file_watcher())
 
 # ============== DB Helpers ==============
 
@@ -229,7 +276,7 @@ async def get_token_authenticated_user(request: Request) -> int:
             data = json.loads(body)
             token = data.get('token')
     except Exception:
-        pass
+        logger.debug('Failed to parse token from request body', exc_info=True)
     # Fallback to query param (GET requests)
     if not token:
         token = request.query_params.get('token')
@@ -341,6 +388,12 @@ async def register(request: Request, username: str = Form(...), password: str = 
     if not validate_csrf_token(csrf_token):
         request.session['register_error'] = 'Invalid request'
         return RedirectResponse('/', status_code=303)
+    if len(username.strip()) < 3:
+        request.session['register_error'] = 'Username must be at least 3 characters'
+        return RedirectResponse('/', status_code=303)
+    if len(password) < 4:
+        request.session['register_error'] = 'Password must be at least 4 characters'
+        return RedirectResponse('/', status_code=303)
     with get_db() as conn:
         try:
             pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
@@ -366,6 +419,7 @@ async def api_login(request: Request):
     try:
         data = await request.json()
     except Exception:
+        logger.debug('Failed to parse request JSON', exc_info=True)
         data = {}
     username = data.get('username', '').strip()
     password = data.get('password', '')
@@ -398,6 +452,7 @@ async def api_register(request: Request):
     try:
         data = await request.json()
     except Exception:
+        logger.debug('Failed to parse request JSON', exc_info=True)
         data = {}
     username = data.get('username', '').strip()
     password = data.get('password', '')
@@ -436,6 +491,7 @@ async def api_logout(request: Request):
     try:
         data = await request.json()
     except Exception:
+        logger.debug('Failed to parse request JSON', exc_info=True)
         data = {}
     token = data.get('token', '')
 
@@ -475,7 +531,9 @@ async def api_update_settings(request: Request, user_id: int = Depends(get_authe
 async def api_create_task(request: Request, user_id: int = Depends(get_authenticated_user)):
     data = await request.json()
     if not data or not data.get('text', '').strip():
-        return JSONResponse({'error': 'Task text is required'}, status_code=400)
+        return error_response('Task text is required')
+    if len(data['text'].strip()) > MAX_TASK_TEXT_LENGTH:
+        return error_response(f'Task text must be at most {MAX_TASK_TEXT_LENGTH} characters')
     task_id = f"{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
     xp = random.randint(20, 35)
 
@@ -502,7 +560,9 @@ async def api_create_task(request: Request, user_id: int = Depends(get_authentic
 async def api_update_task(task_id: str, request: Request, user_id: int = Depends(get_authenticated_user)):
     data = await request.json()
     if not data or not data.get('text', '').strip():
-        return JSONResponse({'error': 'Task text is required'}, status_code=400)
+        return error_response('Task text is required')
+    if len(data['text'].strip()) > MAX_TASK_TEXT_LENGTH:
+        return error_response(f'Task text must be at most {MAX_TASK_TEXT_LENGTH} characters')
     with get_db() as conn:
         conn.execute('UPDATE tasks SET text = ? WHERE id = ? AND user_id = ?', (data['text'].strip(), task_id, user_id))
         conn.commit()
@@ -524,12 +584,13 @@ async def api_complete_task(task_id: str, request: Request, user_id: int = Depen
     with get_db() as conn:
         task = conn.execute('SELECT * FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
         if not task:
-            return JSONResponse({'error': 'Task not found'}, status_code=404)
+            return error_response('Task not found', 404)
 
         progress = get_or_create_progress(conn, user_id)
         try:
             data = await request.json()
         except Exception:
+            logger.debug('Failed to parse request JSON', exc_info=True)
             data = {}
         client_combo = data.get('combo', 0)
         combo = client_combo + 1
@@ -612,11 +673,14 @@ async def bot_add_task(request: Request, user_id: int = Depends(get_token_authen
     try:
         data = await request.json()
     except Exception:
+        logger.debug('Failed to parse request JSON', exc_info=True)
         data = {}
     text = data.get('text', '').strip()
 
     if not text:
         return JSONResponse({'success': False, 'error': 'Task text required'}, status_code=400)
+    if len(text) > MAX_TASK_TEXT_LENGTH:
+        return JSONResponse({'success': False, 'error': f'Task text must be at most {MAX_TASK_TEXT_LENGTH} characters'}, status_code=400)
 
     task_id = f"{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
     xp = random.randint(20, 35)
@@ -693,11 +757,14 @@ async def bot_rename_task(task_id: str, request: Request, user_id: int = Depends
     try:
         data = await request.json()
     except Exception:
+        logger.debug('Failed to parse request JSON', exc_info=True)
         data = {}
     text = data.get('text', '').strip()
 
     if not text:
         return JSONResponse({'success': False, 'error': 'Task text required'}, status_code=400)
+    if len(text) > MAX_TASK_TEXT_LENGTH:
+        return JSONResponse({'success': False, 'error': f'Task text must be at most {MAX_TASK_TEXT_LENGTH} characters'}, status_code=400)
 
     with get_db() as conn:
         conn.execute('UPDATE tasks SET text = ? WHERE id = ? AND user_id = ?', (text, task_id, user_id))
@@ -713,14 +780,14 @@ async def api_upload_media(task_id: str, file: UploadFile = File(...), user_id: 
     with get_db() as conn:
         task = conn.execute('SELECT id FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
         if not task:
-            return JSONResponse({'error': 'Task not found'}, status_code=404)
+            return error_response('Task not found', 404)
 
         if not file.filename:
-            return JSONResponse({'error': 'No file selected'}, status_code=400)
+            return error_response('No file selected')
 
         ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
         if ext not in ALLOWED_EXTENSIONS:
-            return JSONResponse({'error': 'Invalid format'}, status_code=400)
+            return error_response('Invalid format')
 
         media_type = 'video' if ext in {'mp4', 'webm', 'mov'} else 'image'
         filename = f"{task_id}_{uuid.uuid4().hex[:8]}.{ext}"
@@ -735,8 +802,12 @@ async def api_upload_media(task_id: str, file: UploadFile = File(...), user_id: 
             conn.execute('DELETE FROM task_media WHERE task_id = ?', (task_id,))
 
         contents = await file.read()
-        with open(filepath, 'wb') as f:
-            f.write(contents)
+        try:
+            with open(filepath, 'wb') as f:
+                f.write(contents)
+        except IOError:
+            logger.error('Failed to write uploaded file: %s', filepath, exc_info=True)
+            return error_response('Failed to save file', 500)
 
         conn.execute('INSERT INTO task_media (task_id, user_id, media_type, filename) VALUES (?, ?, ?, ?)',
                      (task_id, user_id, media_type, filename))
@@ -750,7 +821,7 @@ async def api_delete_media(task_id: str, user_id: int = Depends(get_authenticate
         media = conn.execute('SELECT filename FROM task_media WHERE task_id = ? AND user_id = ?',
                              (task_id, user_id)).fetchone()
         if not media:
-            return JSONResponse({'error': 'Media not found'}, status_code=404)
+            return error_response('Media not found', 404)
 
         filepath = os.path.join(UPLOAD_FOLDER, media['filename'])
         if os.path.exists(filepath):
@@ -763,6 +834,8 @@ async def api_delete_media(task_id: str, user_id: int = Depends(get_authenticate
 @app.get('/UPLOADS/{filename}')
 async def serve_upload(filename: str):
     filepath = os.path.join(UPLOAD_FOLDER, filename)
+    if not os.path.realpath(filepath).startswith(os.path.realpath(UPLOAD_FOLDER)):
+        raise HTTPException(status_code=403)
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404)
     return FileResponse(filepath)
@@ -862,12 +935,12 @@ async def api_send_friend_request(request: Request, user_id: int = Depends(get_a
     friend_id = data.get('user_id')
 
     if not friend_id or friend_id == user_id:
-        return JSONResponse({'error': 'Invalid request'}, status_code=400)
+        return error_response('Invalid request')
 
     with get_db() as conn:
         friend = conn.execute('SELECT id FROM users WHERE id = ?', (friend_id,)).fetchone()
         if not friend:
-            return JSONResponse({'error': 'User not found'}, status_code=404)
+            return error_response('User not found', 404)
 
         existing = conn.execute('''
             SELECT status FROM friendships
@@ -876,8 +949,8 @@ async def api_send_friend_request(request: Request, user_id: int = Depends(get_a
 
         if existing:
             if existing['status'] == 'accepted':
-                return JSONResponse({'error': 'Already friends'}, status_code=400)
-            return JSONResponse({'error': 'Request already exists'}, status_code=400)
+                return error_response('Already friends')
+            return error_response('Request already exists')
 
         conn.execute('INSERT INTO friendships (user_id, friend_id) VALUES (?, ?)', (user_id, friend_id))
         conn.commit()
@@ -890,7 +963,7 @@ async def api_respond_friend_request(request: Request, user_id: int = Depends(ge
     action = data.get('action')
 
     if action not in ('accept', 'reject'):
-        return JSONResponse({'error': 'Invalid action'}, status_code=400)
+        return error_response('Invalid action')
 
     with get_db() as conn:
         request_row = conn.execute('''
@@ -898,7 +971,7 @@ async def api_respond_friend_request(request: Request, user_id: int = Depends(ge
         ''', (request_id, user_id)).fetchone()
 
         if not request_row:
-            return JSONResponse({'error': 'Request not found'}, status_code=404)
+            return error_response('Request not found', 404)
 
         new_status = 'accepted' if action == 'accept' else 'rejected'
         conn.execute('UPDATE friendships SET status = ? WHERE id = ?', (new_status, request_id))
@@ -916,7 +989,7 @@ async def api_cancel_friend_request(request_id: int, user_id: int = Depends(get_
         conn.commit()
 
         if result.rowcount == 0:
-            return JSONResponse({'error': 'Request not found'}, status_code=404)
+            return error_response('Request not found', 404)
     return JSONResponse({'success': True})
 
 @app.delete('/api/friends/{friend_id}')
@@ -930,7 +1003,7 @@ async def api_remove_friend(friend_id: int, user_id: int = Depends(get_authentic
         conn.commit()
 
         if result.rowcount == 0:
-            return JSONResponse({'error': 'User is not a friend'}, status_code=404)
+            return error_response('User is not a friend', 404)
     return JSONResponse({'success': True})
 
 @app.get('/api/friends/feed')
@@ -1125,5 +1198,6 @@ if __name__ == '__main__':
     debug_mode = APP_DEBUG
     uvicorn.run(
         "run:app", host='127.0.0.1', port=PORT,
-        reload=debug_mode, proxy_headers=True, forwarded_allow_ips='*'
+        reload=debug_mode, reload_includes=['*.py'] if debug_mode else None,
+        proxy_headers=True, forwarded_allow_ips='*'
     )

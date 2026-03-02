@@ -19,9 +19,6 @@ let state = {
 let comboTimer = null;
 let audioCtx = null;
 
-// Generate unique session ID for WebSocket
-const SESSION_ID = 'sess_' + Math.random().toString(36).substr(2, 9);
-
 // WebSocket connection
 let socket = null;
 let reconnectAttempts = 0;
@@ -103,30 +100,6 @@ async function loadState() {
   // Hide skeleton loader
   $('skeleton-loader')?.classList.add('hidden');
   
-  // Show brief refresh indicator
-  showRefreshIndicator();
-}
-
-let refreshIndicatorTimeout = null;
-function showRefreshIndicator() {
-  // Create indicator if it doesn't exist
-  let indicator = $('refresh-indicator');
-  if (!indicator) {
-    indicator = document.createElement('div');
-    indicator.id = 'refresh-indicator';
-    indicator.innerHTML = '🔄';
-    indicator.style.cssText = 'position:fixed;top:10px;right:10px;font-size:24px;opacity:0;transition:opacity 0.3s;z-index:9999;pointer-events:none;';
-    document.body.appendChild(indicator);
-  }
-  
-  // Show indicator
-  indicator.style.opacity = '1';
-
-  // Hide after 1 second
-  if (refreshIndicatorTimeout) clearTimeout(refreshIndicatorTimeout);
-  refreshIndicatorTimeout = setTimeout(() => {
-    indicator.style.opacity = '0';
-  }, 1000);
 }
 
 // Connection status indicator
@@ -153,89 +126,6 @@ function updateConnectionStatus(connected) {
     connectionIndicator.textContent = '● No connection...';
     connectionIndicator.style.opacity = '1';
   }
-}
-
-function showConnectionLostIndicator() {
-  updateConnectionStatus(false);
-}
-
-let serverRestartTimeout = null;
-let serverRestartTimer = null;
-function showServerRestartIndicator() {
-  // Remove existing indicator if any
-  const existing = document.getElementById('server-restart-indicator');
-  if (existing) existing.remove();
-
-  // Create a prominent update indicator
-  const indicator = document.createElement('div');
-  indicator.id = 'server-restart-indicator';
-  
-  let countdown = 2; // 2 seconds until reload
-  
-  const updateCountdown = () => {
-    const countdownEl = document.getElementById('restart-countdown');
-    if (countdownEl) {
-      countdownEl.textContent = `Reloading in ${countdown} sec...`;
-      countdown--;
-      if (countdown < 0) {
-        countdownEl.textContent = 'Loading...';
-      }
-    }
-  };
-
-  indicator.innerHTML = `
-    <div style="
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 30px 40px;
-      border-radius: 16px;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-      text-align: center;
-      z-index: 10000;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      animation: slideIn 0.3s ease-out;
-    ">
-      <div style="font-size: 48px; margin-bottom: 15px; animation: spin 1s linear infinite;">🔄</div>
-      <div style="font-size: 18px; font-weight: 600; margin-bottom: 10px;">Server is updating</div>
-      <div style="font-size: 14px; opacity: 0.9;">Loading new version...</div>
-      <div id="restart-countdown" style="margin-top: 20px; font-size: 12px; opacity: 0.7;">Reloading in ${countdown} sec...</div>
-    </div>
-    <style>
-      @keyframes slideIn {
-        from { opacity: 0; transform: translate(-50%, -60%); }
-        to { opacity: 1; transform: translate(-50%, -50%); }
-      }
-      @keyframes spin {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
-      }
-    </style>
-  `;
-  document.body.appendChild(indicator);
-
-  // Update countdown every second
-  serverRestartTimer = setInterval(updateCountdown, 1000);
-
-  // Auto-hide after 10 seconds if something goes wrong
-  if (serverRestartTimeout) clearTimeout(serverRestartTimeout);
-  serverRestartTimeout = setTimeout(() => {
-    hideServerRestartIndicator();
-  }, 10000);
-}
-
-function hideServerRestartIndicator() {
-  const indicator = document.getElementById('server-restart-indicator');
-  if (indicator) {
-    indicator.style.opacity = '0';
-    indicator.style.transition = 'opacity 0.3s';
-    setTimeout(() => indicator.remove(), 300);
-  }
-  if (serverRestartTimeout) clearTimeout(serverRestartTimeout);
-  if (serverRestartTimer) clearInterval(serverRestartTimer);
 }
 
 // ========== WebSocket (Native) ==========
@@ -275,12 +165,7 @@ function connectWebSocket() {
     // Auth error - don't reconnect
     if (e.code === 4001) return;
 
-    // Don't show "connection lost" if server is restarting
-    const restartIndicator = document.getElementById('server-restart-indicator');
-    if (!restartIndicator) {
-      updateConnectionStatus(false);
-    }
-    wasConnected = false;
+    updateConnectionStatus(false);
 
     if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
       reconnectAttempts++;
@@ -288,7 +173,7 @@ function connectWebSocket() {
       setTimeout(connectWebSocket, RECONNECT_DELAY_MS);
     } else {
       console.error('❌ Max reconnection attempts reached');
-      showConnectionLostIndicator();
+      updateConnectionStatus(false);
       setTimeout(() => window.location.reload(), 3000);
     }
   };
@@ -328,7 +213,7 @@ function handleWebSocketEvent(event, data) {
       break;
 
     case 'task_updated': {
-      console.log('✏️ Task updated (WS):', data);
+      if (pendingEdits.has(data.id)) return;
       const task = state.tasks.find(t => t.id === data.id);
       if (task) {
         task.text = data.text;
@@ -338,7 +223,7 @@ function handleWebSocketEvent(event, data) {
     }
 
     case 'task_deleted': {
-      console.log('🗑️ Task deleted (WS):', data);
+      if (pendingDeletes.has(data.id)) return;
       const taskIndex = state.tasks.findIndex(t => t.id === data.id);
       if (taskIndex !== -1) {
         state.tasks.splice(taskIndex, 1);
@@ -349,6 +234,10 @@ function handleWebSocketEvent(event, data) {
 
     case 'task_completed': {
       console.log('✅ Task completed (WS):', data);
+      if (pendingCompletes.has(data.id)) {
+        console.log('⊘ Skipping duplicate task_completed event for pending task:', data.id);
+        return;
+      }
       const idx = state.tasks.findIndex(t => t.id === data.id);
       if (idx !== -1) state.tasks.splice(idx, 1);
       state.level = data.level;
@@ -357,29 +246,40 @@ function handleWebSocketEvent(event, data) {
       state.completed = data.completed;
       state.streak = data.streak;
       state.combo = data.combo;
-      if (data.newAchievements && data.newAchievements.length > 0) {
-        data.newAchievements.forEach((achId, i) => {
-          state.achievements[achId] = true;
-          const ach = ACHIEVEMENTS.find(a => a.id === achId);
-          if (ach) addToHistory(ach.name, 100, ach.icon);
-          setTimeout(() => showPopup('achievement', achId), i * 500);
-        });
-        renderAchievements();
+      const wsAch = data.newAchievements || [];
+      wsAch.forEach(achId => {
+        state.achievements[achId] = true;
+        const ach = ACHIEVEMENTS.find(a => a.id === achId);
+        if (ach) addToHistory(ach.name, 100, ach.icon);
+      });
+      if (wsAch.length) renderAchievements();
+      if (data.leveledUp) {
+        showPopup('levelup', wsAch);
+      } else {
+        wsAch.forEach((achId, i) => setTimeout(() => showPopup('achievement', achId), i * 500));
       }
-      if (data.leveledUp) showPopup('levelup');
       if (state.combo > 1) playSound('combo');
       renderTasks();
       updateUI();
       break;
     }
 
+    case 'files_changed':
+      console.log('🔄 Files changed:', data.type);
+      if (data.type === 'css') {
+        document.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
+          const url = new URL(link.href);
+          url.searchParams.set('_r', Date.now());
+          link.href = url.toString();
+        });
+      } else {
+        window.location.reload(true);
+      }
+      break;
+
     case 'server_shutdown':
       console.log('🔄 Server shutting down:', data.message);
-      showServerRestartIndicator();
-      setTimeout(() => {
-        hideServerRestartIndicator();
-        window.location.reload(true);
-      }, 2000);
+      setTimeout(() => window.location.reload(true), 2000);
       break;
   }
 }
@@ -425,9 +325,9 @@ function particles(x, y, isLevelup = false) {
 // ========== UI UPDATE ==========
 function updateUI() {
   const txt = { level: state.level, xp: state.xp, 'xp-max': state.xpMax, 'tasks-completed': state.completed,
-    'streak-count': state.streak, 'achievements-count': Object.keys(state.achievements).length, 'task-count': `(${state.tasks.length})` };
-  for (const [id, val] of Object.entries(txt)) $(id).textContent = val;
-  $('xp-fill').style.width = (state.xp / state.xpMax * 100) + '%';
+    'streak-count': state.streak, 'achievements-count': Object.keys(state.achievements).length };
+  for (const [id, val] of Object.entries(txt)) { const el = $(id); if (el) el.textContent = val; }
+  const xpFill = $('xp-fill'); if (xpFill) xpFill.style.width = (state.xp / state.xpMax * 100) + '%';
   $('combo-container').classList.toggle('active', state.combo > 0);
   if (state.combo > 0) $('combo').textContent = state.combo;
   $('sound-icon').innerHTML = state.sound ? '&#128266;' : '&#128263;';
@@ -435,14 +335,31 @@ function updateUI() {
 }
 
 // ========== RENDER TASKS ==========
+let _taskSearchQuery = '';
+
 function renderTasks() {
   const list = $('tasks-list');
   list.innerHTML = '';
-  $('empty-state').classList.toggle('show', state.tasks.length === 0);
+  const empty = state.tasks.length === 0;
+  $('empty-state').classList.toggle('show', empty);
+  $('tasks-header').style.display = empty ? 'none' : '';
 
-  state.tasks.forEach(task => {
+  const query = _taskSearchQuery.toLowerCase();
+  const filtered = query ? state.tasks.filter(t => t.text.toLowerCase().includes(query)) : state.tasks;
+
+  const _demoTimes = ['03:00', '08:30', '14:30', '20:00'];
+  const sorted = [...filtered].sort((a, b) => {
+    const ta = a.scheduled_date && a.scheduled_time ? a.scheduled_date.split('.').reverse().join('') + a.scheduled_time.replace(':', '') : _demoTimes[filtered.indexOf(a) % 4].replace(':', '');
+    const tb = b.scheduled_date && b.scheduled_time ? b.scheduled_date.split('.').reverse().join('') + b.scheduled_time.replace(':', '') : _demoTimes[filtered.indexOf(b) % 4].replace(':', '');
+    return ta.localeCompare(tb);
+  });
+
+  sorted.forEach((task, i) => {
     const li = document.createElement('li');
-    li.className = 'task-item';
+    const timeStr = task.scheduled_time || _demoTimes[i % 4];
+    const hour = timeStr ? parseInt(timeStr.split(':')[0], 10) : -1;
+    const timePeriod = hour < 0 ? '' : hour < 6 ? 'time-night' : hour < 12 ? 'time-morning' : hour < 18 ? 'time-day' : 'time-evening';
+    li.className = 'task-item' + (timePeriod ? ' ' + timePeriod : '');
     li.dataset.id = task.id;
 
     // Build media HTML
@@ -458,6 +375,8 @@ function renderTasks() {
       <label class="task-checkbox"><input type="checkbox" aria-label="Complete quest"><span class="checkbox-custom"></span></label>
       <span class="task-text">${esc(task.text)}</span>
       <span class="task-xp">+${task.xp} XP</span>
+      <span class="task-date"><span class="task-date-day">${task.scheduled_date || '02.03.2026'}</span><span class="task-date-time">${task.scheduled_time || _demoTimes[i % 4]}</span></span>
+      <span class="task-date task-deadline"><span class="task-date-day">${task.deadline_date || '05.03.2026'}</span><span class="task-date-time">${task.deadline_time || _demoTimes[(i + 1) % 4]}</span></span>
       <button class="task-delete" aria-label="Delete quest">&#128465;</button>`;
 
     li.querySelector('input').onchange = () => completeTask(task.id, li);
@@ -473,7 +392,8 @@ function renderTasks() {
 
     list.appendChild(li);
   });
-  $('task-count').textContent = `(${state.tasks.length})`;
+  const taskCount = $('task-count');
+  if (taskCount) taskCount.textContent = `(${state.tasks.length})`;
 }
 
 // ========== RENDER ACHIEVEMENTS ==========
@@ -487,22 +407,46 @@ function renderAchievements() {
 }
 
 // ========== POPUPS ==========
+let _lastLevelUpAt = 0;
+
 function showPopup(type, data) {
   const isAch = type === 'achievement';
   const popup = $(isAch ? 'achievement-popup' : 'levelup-popup');
-  if (isAch) {
+  if (!isAch) {
+    // Dedup: skip if level up was shown within last 3 seconds (HTTP + WS race)
+    const now = Date.now();
+    if (now - _lastLevelUpAt < 3000) return;
+    _lastLevelUpAt = now;
+    $('new-level').textContent = state.level;
+    // Show achievements earned alongside level up
+    const achContainer = $('levelup-achievements');
+    achContainer.textContent = '';
+    const achIds = Array.isArray(data) ? data : [];
+    achIds.forEach(achId => {
+      const a = ACHIEVEMENTS.find(x => x.id === achId);
+      if (!a) return;
+      const el = document.createElement('div');
+      el.className = 'levelup-ach';
+      el.innerHTML = `<span class="levelup-ach-icon">${a.icon}</span><div class="levelup-ach-text"><div class="levelup-ach-name">${esc(a.name)}</div><div class="levelup-ach-desc">${esc(a.desc)}</div></div>`;
+      achContainer.appendChild(el);
+    });
+  } else {
     const a = ACHIEVEMENTS.find(x => x.id === data);
     if (!a) return;
-    $('popup-icon').innerHTML = a.icon; $('popup-name').textContent = a.name; $('popup-desc').textContent = a.desc;
-  } else $('new-level').textContent = state.level;
+    $('popup-icon').textContent = a.icon; $('popup-name').textContent = a.name; $('popup-desc').textContent = a.desc;
+  }
   popup.classList.add('show');
   playSound(isAch ? 'achievement' : 'levelup');
   setTimeout(() => { const r = popup.getBoundingClientRect(); particles(r.left + r.width / 2, r.top + r.height / 2, !isAch); }, 100);
-  setTimeout(() => popup.classList.remove('show'), isAch ? ACHIEVEMENT_POPUP_MS : LEVELUP_POPUP_MS);
+  const duration = isAch ? ACHIEVEMENT_POPUP_MS : (LEVELUP_POPUP_MS + (Array.isArray(data) && data.length ? 1000 : 0));
+  setTimeout(() => popup.classList.remove('show'), duration);
 }
 
 // ========== TASK ACTIONS ==========
-let pendingTasks = new Set(); // Track tasks being created
+let pendingTasks = new Set();
+let pendingCompletes = new Set();
+let pendingDeletes = new Set();
+let pendingEdits = new Set();
 
 async function addTask(text) {
   if (!text.trim()) return;
@@ -551,6 +495,7 @@ async function completeTask(id, el) {
   // Reset combo timer
   clearTimeout(comboTimer);
 
+  pendingCompletes.add(id);
   const result = await api(`/api/tasks/${id}/complete`, {
     method: 'POST',
     body: JSON.stringify({ combo: state.combo })
@@ -558,6 +503,7 @@ async function completeTask(id, el) {
 
   setTimeout(() => {
     if (result && result.success) {
+      setTimeout(() => pendingCompletes.delete(id), 3000);
       // Update state from server response
       state.tasks = state.tasks.filter(t => t.id !== id);
       state.level = result.level;
@@ -571,17 +517,19 @@ async function completeTask(id, el) {
       addToHistory('Task completed', result.xpEarned);
 
       // Show achievements
-      if (result.newAchievements && result.newAchievements.length > 0) {
-        result.newAchievements.forEach((achId, i) => {
-          state.achievements[achId] = true;
-          const ach = ACHIEVEMENTS.find(a => a.id === achId);
-          if (ach) addToHistory(ach.name, 100, ach.icon);
-          setTimeout(() => showPopup('achievement', achId), i * 500);
-        });
-      }
+      const newAch = result.newAchievements || [];
+      newAch.forEach(achId => {
+        state.achievements[achId] = true;
+        const ach = ACHIEVEMENTS.find(a => a.id === achId);
+        if (ach) addToHistory(ach.name, 100, ach.icon);
+      });
 
-      // Show level up
-      if (result.leveledUp) showPopup('levelup');
+      // Show level up (with achievements if any) or standalone achievements
+      if (result.leveledUp) {
+        showPopup('levelup', newAch);
+      } else {
+        newAch.forEach((achId, i) => setTimeout(() => showPopup('achievement', achId), i * 500));
+      }
 
       if (state.combo > 1) playSound('combo');
 
@@ -600,6 +548,7 @@ async function completeTask(id, el) {
 }
 
 async function deleteTask(id, el) {
+  pendingDeletes.add(id);
   el.style.animation = 'task-enter 0.3s ease reverse';
   playSound('delete');
 
@@ -608,6 +557,7 @@ async function deleteTask(id, el) {
   setTimeout(() => {
     state.tasks = state.tasks.filter(t => t.id !== id);
     renderTasks();
+    setTimeout(() => pendingDeletes.delete(id), 3000);
   }, TASK_DELETE_ANIMATION_MS);
 }
 
@@ -619,6 +569,7 @@ async function editTask(id, newText) {
     return;
   }
 
+  pendingEdits.add(id);
   await api(`/api/tasks/${id}`, {
     method: 'PUT',
     body: JSON.stringify({ text })
@@ -626,6 +577,7 @@ async function editTask(id, newText) {
 
   const task = state.tasks.find(t => t.id === id);
   if (task) task.text = text;
+  setTimeout(() => pendingEdits.delete(id), 3000);
 }
 
 // ========== EVENT LISTENERS ==========
@@ -1394,6 +1346,12 @@ document.head.appendChild(style);
 checkIfMobile();
 if (isMobileDevice) initMobileVideoObserver();
 
+// Initialize task search filter
+$('task-search').addEventListener('input', e => {
+  _taskSearchQuery = e.target.value.trim();
+  renderTasks();
+});
+
 // Initialize tabs
 initTabs();
 initSearch();
@@ -1408,18 +1366,15 @@ loadState().then(() => {
 
 // ========== AUTO-REFRESH ==========
 
-// Refresh state when tab becomes visible (user returns to tab)
+// Refresh state when tab becomes visible (covers both visibilitychange and focus)
+let _lastRefreshAt = 0;
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
-    console.log('Tab visible - refreshing data...');
+    const now = Date.now();
+    if (now - _lastRefreshAt < 3000) return;
+    _lastRefreshAt = now;
     loadState();
   }
-});
-
-// Refresh state when window regains focus
-window.addEventListener('focus', () => {
-  console.log('Window focused - refreshing data...');
-  loadState();
 });
 
 // Periodic background refresh (every 60 seconds)
@@ -1438,12 +1393,6 @@ function startAutoRefresh() {
 
 // Start auto-refresh
 startAutoRefresh();
-
-// Clean up any leftover restart indicator on page load
-document.addEventListener('DOMContentLoaded', () => {
-  const indicator = document.getElementById('server-restart-indicator');
-  if (indicator) indicator.remove();
-});
 
 // Stop auto-refresh and WebSocket on page unload
 window.addEventListener('beforeunload', () => {
