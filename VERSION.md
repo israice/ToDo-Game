@@ -3,10 +3,10 @@
 ┌──────────────────────┬───────────────────────────────────┐
 │ Сценарий             │ Способ                            │
 ├──────────────────────┼───────────────────────────────────┤
-│ Личное использование │ python server.py                  │
-│ Разработка           │ ./start-all.sh (видны логи обоих) │
+│ Личное использование │ python run.py                  │
+│ Разработка           │ BACKEND/start-all.sh (видны логи обоих) │
 │ Production сервер    │ docker-compose up -d              │
-│ Только веб без бота  │ python server.py                  │
+│ Только веб без бота  │ python run.py                  │
 └──────────────────────┴───────────────────────────────────┘
 docker compose up -d --build
 
@@ -24,7 +24,7 @@ git reset --hard 80f714fc
 git clean -fd
 Copy-Item $env:TEMP\.env.backup .env -Force
 git push origin master --force
-python server.py
+python run.py
 
 # UPDATE
 git add .
@@ -45,3 +45,4 @@ v0.0.30 - track WebSocket connection state and refresh on reconnect
 v0.0.31 - more ative tasks in list less paddings
 v0.0.32 - test 1
 v0.0.33 - test 2
+v0.0.34 - changed to FastAPI and Bitwarden support

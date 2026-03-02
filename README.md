@@ -204,7 +204,7 @@ cd todo-game
 pip install flask flask-wtf bcrypt python-dotenv
 
 # Играй
-python server.py
+python run.py
 ```
 
 Открой **http://localhost:5010** и создай аккаунт.
@@ -215,9 +215,11 @@ python server.py
 
 ```bash
 # Windows
+cd BACKEND
 start-all.bat
 
 # Linux/Mac
+cd BACKEND
 chmod +x start-all.sh
 ./start-all.sh
 ```
@@ -249,7 +251,7 @@ docker-compose up -d --build
 2. **Настрой .env:** Добавь `TELEGRAM_BOT_TOKEN=your_token`
 3. **Запусти бота:**
    ```bash
-   cd telegram
+   cd BACKEND/TELEGRAM
    npm install
    node run.js
    ```
@@ -264,7 +266,7 @@ docker-compose up -d --build
 - ✏️ Переименование задач
 - 📋 Просмотр списка задач
 
-**Подробнее:** См. [telegram/README.md](telegram/README.md)
+**Подробнее:** См. [BACKEND/TELEGRAM/README.md](BACKEND/TELEGRAM/README.md)
 
 ---
 

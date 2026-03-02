@@ -115,7 +115,7 @@ function showRefreshIndicator() {
     indicator = document.createElement('div');
     indicator.id = 'refresh-indicator';
     indicator.innerHTML = '🔄';
-    indicator.style.cssText = 'position:fixed;top:10px;right:10px;font-size:24px;opacity:0;transition:opacity 0.3s;z-index:9999;';
+    indicator.style.cssText = 'position:fixed;top:10px;right:10px;font-size:24px;opacity:0;transition:opacity 0.3s;z-index:9999;pointer-events:none;';
     document.body.appendChild(indicator);
   }
   
@@ -238,26 +238,21 @@ function hideServerRestartIndicator() {
   if (serverRestartTimer) clearInterval(serverRestartTimer);
 }
 
-// ========== WebSocket (Socket.IO) ==========
+// ========== WebSocket (Native) ==========
 
 let wasConnected = false;  // Track if we had a connection before
 
 function connectWebSocket() {
   if (socket) {
-    socket.disconnect();
+    socket.close();
+    socket = null;
   }
 
-  // Connect to Socket.IO server
-  socket = io({
-    transports: ['websocket', 'polling'],
-    reconnection: true,
-    reconnectionDelay: RECONNECT_DELAY_MS,
-    reconnectionDelayMax: 10000,
-    reconnectionAttempts: MAX_RECONNECT_ATTEMPTS
-  });
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  socket = new WebSocket(`${protocol}//${location.host}/ws`);
 
-  socket.on('connect', () => {
-    console.log('✓ WebSocket connected:', socket.id);
+  socket.onopen = () => {
+    console.log('✓ WebSocket connected');
     reconnectAttempts = 0;
 
     // If reconnecting after disconnection, refresh state to catch missed events
@@ -267,132 +262,126 @@ function connectWebSocket() {
     }
     wasConnected = true;
     updateConnectionStatus(true);
-  });
+  };
 
-  socket.on('disconnect', (reason) => {
-    console.log('✗ WebSocket disconnected:', reason);
-    wasConnected = false;
-    
+  socket.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    handleWebSocketEvent(msg.event, msg.data);
+  };
+
+  socket.onclose = (e) => {
+    console.log('✗ WebSocket disconnected:', e.code, e.reason);
+
+    // Auth error - don't reconnect
+    if (e.code === 4001) return;
+
     // Don't show "connection lost" if server is restarting
     const restartIndicator = document.getElementById('server-restart-indicator');
     if (!restartIndicator) {
       updateConnectionStatus(false);
     }
-  });
+    wasConnected = false;
 
-  socket.on('task_created', (data) => {
-    console.log('📝 Task created (WS):', data);
-
-    // Skip if this task is already added from API response (same tab)
-    if (pendingTasks.has(data.id)) {
-      console.log('⊘ Skipping duplicate task_created event for pending task:', data.id);
-      return;
+    if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+      reconnectAttempts++;
+      console.log(`🔄 Reconnecting (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+      setTimeout(connectWebSocket, RECONNECT_DELAY_MS);
+    } else {
+      console.error('❌ Max reconnection attempts reached');
+      showConnectionLostIndicator();
+      setTimeout(() => window.location.reload(), 3000);
     }
+  };
 
-    // Check if this is from another tab/window
-    const existingTask = state.tasks.find(t => t.id === data.id);
-    if (!existingTask) {
-      state.tasks.unshift({ id: data.id, text: data.text, xp: data.xp });
-
-      // Update state if includes XP/level changes
-      if (data.xpEarned) {
-        state.level = data.level;
-        state.xp = data.currentXp;
-        state.xpMax = data.xpMax;
-        if (data.leveledUp) showPopup('levelup');
-      }
-
-      renderTasks();
-      updateUI();
-      playSound('add');
-    }
-  });
-
-  socket.on('task_updated', (data) => {
-    console.log('✏️ Task updated (WS):', data);
-
-    const task = state.tasks.find(t => t.id === data.id);
-    if (task) {
-      task.text = data.text;
-      renderTasks();
-    }
-  });
-
-  socket.on('task_deleted', (data) => {
-    console.log('🗑️ Task deleted (WS):', data);
-
-    const taskIndex = state.tasks.findIndex(t => t.id === data.id);
-    if (taskIndex !== -1) {
-      state.tasks.splice(taskIndex, 1);
-      renderTasks();
-    }
-  });
-
-  socket.on('task_completed', (data) => {
-    console.log('✅ Task completed (WS):', data);
-
-    // Remove task from list
-    const taskIndex = state.tasks.findIndex(t => t.id === data.id);
-    if (taskIndex !== -1) {
-      state.tasks.splice(taskIndex, 1);
-    }
-
-    // Update state
-    state.level = data.level;
-    state.xp = data.xp;
-    state.xpMax = data.xpMax;
-    state.completed = data.completed;
-    state.streak = data.streak;
-    state.combo = data.combo;
-
-    // Handle achievements
-    if (data.newAchievements && data.newAchievements.length > 0) {
-      data.newAchievements.forEach((achId, i) => {
-        state.achievements[achId] = true;
-        const ach = ACHIEVEMENTS.find(a => a.id === achId);
-        if (ach) addToHistory(ach.name, 100, ach.icon);
-        setTimeout(() => showPopup('achievement', achId), i * 500);
-      });
-      renderAchievements();
-    }
-
-    // Handle level up
-    if (data.leveledUp) showPopup('levelup');
-
-    if (state.combo > 1) playSound('combo');
-
-    renderTasks();
-    updateUI();
-  });
-
-  socket.on('connect_error', (err) => {
-    console.error('❌ WebSocket connection error:', err);
-  });
-
-  socket.on('reconnect_attempt', (attempt) => {
-    console.log(`🔄 Reconnecting (attempt ${attempt}/${MAX_RECONNECT_ATTEMPTS})`);
-  });
-
-  socket.on('reconnect_failed', () => {
-    console.error('❌ Max reconnection attempts reached');
-    showConnectionLostIndicator();
-    // Auto-reload after 3 seconds
-    setTimeout(() => {
-      window.location.reload();
-    }, 3000);
-  });
-
-  socket.on('server_shutdown', (data) => {
-    console.log('🔄 Server shutting down:', data.message);
-    showServerRestartIndicator();
-    // Auto-reload with cache bust after 2 seconds
-    setTimeout(() => {
-      hideServerRestartIndicator();
-      window.location.reload(true);  // true forces reload from server
-    }, 2000);
-  });
+  socket.onerror = (err) => {
+    console.error('❌ WebSocket error:', err);
+  };
 
   console.log('📡 Connecting to WebSocket...');
+}
+
+function handleWebSocketEvent(event, data) {
+  switch (event) {
+    case 'connected':
+      console.log('✓ Authenticated:', data);
+      break;
+
+    case 'task_created':
+      console.log('📝 Task created (WS):', data);
+      if (pendingTasks.has(data.id)) {
+        console.log('⊘ Skipping duplicate task_created event for pending task:', data.id);
+        return;
+      }
+      const existingTask = state.tasks.find(t => t.id === data.id);
+      if (!existingTask) {
+        state.tasks.unshift({ id: data.id, text: data.text, xp: data.xp });
+        if (data.xpEarned) {
+          state.level = data.level;
+          state.xp = data.currentXp;
+          state.xpMax = data.xpMax;
+          if (data.leveledUp) showPopup('levelup');
+        }
+        renderTasks();
+        updateUI();
+        playSound('add');
+      }
+      break;
+
+    case 'task_updated': {
+      console.log('✏️ Task updated (WS):', data);
+      const task = state.tasks.find(t => t.id === data.id);
+      if (task) {
+        task.text = data.text;
+        renderTasks();
+      }
+      break;
+    }
+
+    case 'task_deleted': {
+      console.log('🗑️ Task deleted (WS):', data);
+      const taskIndex = state.tasks.findIndex(t => t.id === data.id);
+      if (taskIndex !== -1) {
+        state.tasks.splice(taskIndex, 1);
+        renderTasks();
+      }
+      break;
+    }
+
+    case 'task_completed': {
+      console.log('✅ Task completed (WS):', data);
+      const idx = state.tasks.findIndex(t => t.id === data.id);
+      if (idx !== -1) state.tasks.splice(idx, 1);
+      state.level = data.level;
+      state.xp = data.xp;
+      state.xpMax = data.xpMax;
+      state.completed = data.completed;
+      state.streak = data.streak;
+      state.combo = data.combo;
+      if (data.newAchievements && data.newAchievements.length > 0) {
+        data.newAchievements.forEach((achId, i) => {
+          state.achievements[achId] = true;
+          const ach = ACHIEVEMENTS.find(a => a.id === achId);
+          if (ach) addToHistory(ach.name, 100, ach.icon);
+          setTimeout(() => showPopup('achievement', achId), i * 500);
+        });
+        renderAchievements();
+      }
+      if (data.leveledUp) showPopup('levelup');
+      if (state.combo > 1) playSound('combo');
+      renderTasks();
+      updateUI();
+      break;
+    }
+
+    case 'server_shutdown':
+      console.log('🔄 Server shutting down:', data.message);
+      showServerRestartIndicator();
+      setTimeout(() => {
+        hideServerRestartIndicator();
+        window.location.reload(true);
+      }, 2000);
+      break;
+  }
 }
 
 // ========== SOUND ==========
@@ -1434,7 +1423,7 @@ function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(() => {
     // Only refresh if tab is visible and WebSocket is not connected
-    if (!document.hidden && !socket) {
+    if (!document.hidden && (!socket || socket.readyState !== WebSocket.OPEN)) {
       console.log('Auto-refreshing data (WebSocket not available)...');
       loadState();
     }
@@ -1454,7 +1443,7 @@ document.addEventListener('DOMContentLoaded', () => {
 window.addEventListener('beforeunload', () => {
   if (refreshTimer) clearInterval(refreshTimer);
   if (socket) {
-    socket.disconnect();
+    socket.close();
     console.log('WebSocket connection closed');
   }
 });

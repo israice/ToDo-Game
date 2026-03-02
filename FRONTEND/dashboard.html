@@ -9,7 +9,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v=app_version) }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}?v={{ app_version }}">
 </head>
 <body>
     <a href="#tasks-list" class="skip-to-content">Перейти к задачам</a>
@@ -269,7 +269,6 @@
 
     </div>
 
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-    <script src="{{ url_for('static', filename='app.js', v=app_version) }}"></script>
+    <script src="{{ url_for('static', path='app.js') }}?v={{ app_version }}"></script>
 </body>
 </html>

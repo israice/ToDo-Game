@@ -5,21 +5,21 @@ echo ========================================
 echo.
 
 REM Check if .env exists
-if not exist .env (
+if not exist ..\\.env (
     echo [WARNING] .env file not found! Copying from .env.example...
-    copy .env.example .env
+    copy ..\\.env.example ..\\.env
     echo [INFO] Please edit .env file with your configuration
     echo [INFO] Press any key to continue...
     pause > nul
 )
 
 echo [INFO] Starting Flask server...
-start "Flask Server" cmd /k "python server.py"
+start "Flask Server" cmd /k "cd .. && python run.py"
 
 timeout /t 3 /nobreak > nul
 
 echo [INFO] Starting Telegram bot...
-cd telegram
+cd TELEGRAM
 start "Telegram Bot" cmd /k "node run.js"
 cd ..
 

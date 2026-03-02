@@ -250,7 +250,7 @@
                 {% if error %}<div class="error">{{ error }}</div>{% endif %}
                 {% if register_error == "Пользователь уже существует" %}<div class="error">{{ register_error }}</div>{% endif %}
                 <form method="post" action="/login">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <div class="input-group">
                         <label for="login-username">Имя пользователя</label>
                         <input id="login-username" name="username" type="text" placeholder="Введите имя пользователя" required autocomplete="username" autofocus>
@@ -266,7 +266,7 @@
             <div id="register" class="form">
                 {% if register_error and register_error != "Пользователь уже существует" %}<div class="error">{{ register_error }}</div>{% endif %}
                 <form method="post" action="/register">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <div class="input-group">
                         <label for="register-username">Имя пользователя</label>
                         <input id="register-username" name="username" type="text" placeholder="Придумайте имя пользователя" required autocomplete="username">

@@ -57,7 +57,8 @@ module.exports = {
 
   // === API Configuration ===
   api: {
-    baseUrl: process.env.API_URL || 'https://todo.weforks.org'
+    // Default matches SETTINGS.py; overridden by API_URL env var in Docker
+    baseUrl: process.env.API_URL || 'http://localhost:5000'
   },
 
   // === Credentials (optional, for default user) ===

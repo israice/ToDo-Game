@@ -30,7 +30,7 @@ Telegram-бот для управления задачами в TODO GAME чер
                   │ HTTP запросы
                   ↓
 ┌─────────────────────────────────────────┐
-│  TODO GAME API (server.py)              │
+│  TODO GAME API (run.py)              │
 │  • /api/auth/login                      │
 │  • /api/auth/register                   │
 │  • /api/bot/tasks/*                     │
@@ -47,7 +47,7 @@ Telegram-бот для управления задачами в TODO GAME чер
 1. **Клонируйте репозиторий:**
    ```bash
    git clone <repository-url>
-   cd todo-game/telegram
+   cd todo-game/BACKEND/TELEGRAM
    ```
 
 2. **Установите зависимости:**
@@ -112,7 +112,7 @@ npm start
 ## 📁 Структура проекта
 
 ```
-telegram/
+BACKEND/TELEGRAM/
 ├── run.js              # Telegram бот (основной)
 ├── browser.js          # API сервис (HTTP запросы)
 ├── config.js           # Конфигурация
