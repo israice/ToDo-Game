@@ -199,7 +199,8 @@ function handleWebSocketEvent(event, data) {
       }
       const existingTask = state.tasks.find(t => t.id === data.id);
       if (!existingTask) {
-        state.tasks.unshift({ id: data.id, text: data.text, xp: data.xp });
+        state.tasks.unshift({ id: data.id, text: data.text, xp: data.xp,
+          scheduled_start: data.scheduled_start, scheduled_end: data.scheduled_end });
         if (data.xpEarned) {
           state.level = data.level;
           state.xp = data.currentXp;
@@ -217,6 +218,8 @@ function handleWebSocketEvent(event, data) {
       const task = state.tasks.find(t => t.id === data.id);
       if (task) {
         task.text = data.text;
+        if (data.scheduled_start !== undefined) task.scheduled_start = data.scheduled_start;
+        if (data.scheduled_end !== undefined) task.scheduled_end = data.scheduled_end;
         renderTasks();
       }
       break;
@@ -334,12 +337,28 @@ function updateUI() {
   const ss = $('sound-status'); if (ss) ss.textContent = state.sound ? 'ON' : 'OFF';
 }
 
+// ========== DATE FORMATTING ==========
+function formatTaskDate(iso) {
+  if (!iso) return { day: '', time: '' };
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return { day: '', time: '' };
+  const day = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  return { day, time };
+}
+
+function getHourFromISO(iso) {
+  if (!iso) return -1;
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? -1 : d.getHours();
+}
+
 // ========== RENDER TASKS ==========
 let _taskSearchQuery = '';
 
 function renderTasks() {
   const list = $('tasks-list');
-  list.innerHTML = '';
+  list.textContent = '';
   const empty = state.tasks.length === 0;
   $('empty-state').classList.toggle('show', empty);
   $('tasks-header').style.display = empty ? 'none' : '';
@@ -347,48 +366,100 @@ function renderTasks() {
   const query = _taskSearchQuery.toLowerCase();
   const filtered = query ? state.tasks.filter(t => t.text.toLowerCase().includes(query)) : state.tasks;
 
-  const _demoTimes = ['03:00', '08:30', '14:30', '20:00'];
   const sorted = [...filtered].sort((a, b) => {
-    const ta = a.scheduled_date && a.scheduled_time ? a.scheduled_date.split('.').reverse().join('') + a.scheduled_time.replace(':', '') : _demoTimes[filtered.indexOf(a) % 4].replace(':', '');
-    const tb = b.scheduled_date && b.scheduled_time ? b.scheduled_date.split('.').reverse().join('') + b.scheduled_time.replace(':', '') : _demoTimes[filtered.indexOf(b) % 4].replace(':', '');
-    return ta.localeCompare(tb);
+    const sa = a.scheduled_start || '';
+    const sb = b.scheduled_start || '';
+    if (sa && sb) return sa.localeCompare(sb);
+    if (sa) return -1;
+    if (sb) return 1;
+    return 0;
   });
 
-  sorted.forEach((task, i) => {
+  sorted.forEach((task) => {
     const li = document.createElement('li');
-    const timeStr = task.scheduled_time || _demoTimes[i % 4];
-    const hour = timeStr ? parseInt(timeStr.split(':')[0], 10) : -1;
+    const hour = getHourFromISO(task.scheduled_start);
     const timePeriod = hour < 0 ? '' : hour < 6 ? 'time-night' : hour < 12 ? 'time-morning' : hour < 18 ? 'time-day' : 'time-evening';
     li.className = 'task-item' + (timePeriod ? ' ' + timePeriod : '');
     li.dataset.id = task.id;
 
-    // Build media HTML
-    const mediaHtml = task.media
-      ? (task.media.type === 'image'
-        ? `<img src="${task.media.url}" alt="">`
-        : `<video src="${task.media.url}" muted></video>`)
-      : '🖼️';
-    const hasImageClass = task.media ? 'has-image' : '';
+    const start = formatTaskDate(task.scheduled_start);
+    const end = formatTaskDate(task.scheduled_end);
 
-    li.innerHTML = `
-      <span class="task-media ${hasImageClass}">${mediaHtml}</span>
-      <label class="task-checkbox"><input type="checkbox" aria-label="Complete quest"><span class="checkbox-custom"></span></label>
-      <span class="task-text">${esc(task.text)}</span>
-      <span class="task-xp">+${task.xp} XP</span>
-      <span class="task-date"><span class="task-date-day">${task.scheduled_date || '02.03.2026'}</span><span class="task-date-time">${task.scheduled_time || _demoTimes[i % 4]}</span></span>
-      <span class="task-date task-deadline"><span class="task-date-day">${task.deadline_date || '05.03.2026'}</span><span class="task-date-time">${task.deadline_time || _demoTimes[(i + 1) % 4]}</span></span>
-      <button class="task-delete" aria-label="Delete quest">&#128465;</button>`;
+    // Build task item using DOM methods
+    const mediaSpan = document.createElement('span');
+    mediaSpan.className = 'task-media' + (task.media ? ' has-image' : '');
+    if (task.media) {
+      const mediaEl = task.media.type === 'image' ? document.createElement('img') : document.createElement('video');
+      mediaEl.src = task.media.url;
+      if (task.media.type === 'image') mediaEl.alt = '';
+      else mediaEl.muted = true;
+      mediaSpan.appendChild(mediaEl);
+    } else {
+      mediaSpan.textContent = '\uD83D\uDDBC\uFE0F';
+    }
 
-    li.querySelector('input').onchange = () => completeTask(task.id, li);
-    li.querySelector('.task-delete').onclick = () => deleteTask(task.id, li);
-    li.querySelector('.task-media').onclick = () => openMediaPopup(task.id);
+    const checkLabel = document.createElement('label');
+    checkLabel.className = 'task-checkbox';
+    const checkInput = document.createElement('input');
+    checkInput.type = 'checkbox';
+    checkInput.setAttribute('aria-label', 'Complete quest');
+    const checkCustom = document.createElement('span');
+    checkCustom.className = 'checkbox-custom';
+    checkLabel.appendChild(checkInput);
+    checkLabel.appendChild(checkCustom);
 
-    const textEl = li.querySelector('.task-text');
+    const textSpan = document.createElement('span');
+    textSpan.className = 'task-text';
+    textSpan.textContent = task.text;
+
+    const xpSpan = document.createElement('span');
+    xpSpan.className = 'task-xp';
+    xpSpan.textContent = '+' + task.xp + ' XP';
+
+    const startDateSpan = document.createElement('span');
+    startDateSpan.className = 'task-date';
+    const startDay = document.createElement('span');
+    startDay.className = 'task-date-day';
+    startDay.textContent = start.day;
+    const startTime = document.createElement('span');
+    startTime.className = 'task-date-time';
+    startTime.textContent = start.time;
+    startDateSpan.appendChild(startDay);
+    startDateSpan.appendChild(startTime);
+
+    const endDateSpan = document.createElement('span');
+    endDateSpan.className = 'task-date task-deadline';
+    const endDay = document.createElement('span');
+    endDay.className = 'task-date-day';
+    endDay.textContent = end.day;
+    const endTime = document.createElement('span');
+    endTime.className = 'task-date-time';
+    endTime.textContent = end.time;
+    endDateSpan.appendChild(endDay);
+    endDateSpan.appendChild(endTime);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'task-delete';
+    deleteBtn.setAttribute('aria-label', 'Delete quest');
+    deleteBtn.innerHTML = '&#128465;';
+
+    li.appendChild(mediaSpan);
+    li.appendChild(checkLabel);
+    li.appendChild(textSpan);
+    li.appendChild(xpSpan);
+    li.appendChild(startDateSpan);
+    li.appendChild(endDateSpan);
+    li.appendChild(deleteBtn);
+
+    checkInput.onchange = () => completeTask(task.id, li);
+    deleteBtn.onclick = () => deleteTask(task.id, li);
+    mediaSpan.onclick = () => openMediaPopup(task.id);
+
     let original = task.text;
     const debouncedEdit = debounce((id, text) => editTask(id, text), DEBOUNCE_DELAY_MS);
-    textEl.onclick = e => { e.stopPropagation(); original = task.text; textEl.contentEditable = 'true'; textEl.focus(); document.getSelection().selectAllChildren(textEl); };
-    textEl.onblur = () => { textEl.contentEditable = 'false'; debouncedEdit(task.id, textEl.textContent); };
-    textEl.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); textEl.blur(); } else if (e.key === 'Escape') { textEl.textContent = original; textEl.contentEditable = 'false'; } };
+    textSpan.onclick = e => { e.stopPropagation(); original = task.text; textSpan.contentEditable = 'true'; textSpan.focus(); document.getSelection().selectAllChildren(textSpan); };
+    textSpan.onblur = () => { textSpan.contentEditable = 'false'; debouncedEdit(task.id, textSpan.textContent); };
+    textSpan.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); textSpan.blur(); } else if (e.key === 'Escape') { textSpan.textContent = original; textSpan.contentEditable = 'false'; } };
 
     list.appendChild(li);
   });
@@ -451,9 +522,15 @@ let pendingEdits = new Set();
 async function addTask(text) {
   if (!text.trim()) return;
 
+  const body = { text: text.trim() };
+  const startInput = $('schedule-start');
+  const endInput = $('schedule-end');
+  if (startInput && startInput.value) body.scheduled_start = new Date(startInput.value).toISOString();
+  if (endInput && endInput.value) body.scheduled_end = new Date(endInput.value).toISOString();
+
   const result = await api('/api/tasks', {
     method: 'POST',
-    body: JSON.stringify({ text: text.trim() })
+    body: JSON.stringify(body)
   });
 
   if (result && result.id) {
@@ -466,7 +543,10 @@ async function addTask(text) {
       return;
     }
 
-    state.tasks.unshift({ id: result.id, text: result.text, xp: result.xp });
+    state.tasks.unshift({
+      id: result.id, text: result.text, xp: result.xp,
+      scheduled_start: result.scheduled_start, scheduled_end: result.scheduled_end
+    });
 
     // +3 XP for creating a task
     if (result.xpEarned) {
@@ -480,7 +560,14 @@ async function addTask(text) {
     renderTasks();
     updateUI();
     playSound('add');
-    
+
+    // Clear schedule fields
+    if (startInput) startInput.value = '';
+    if (endInput) endInput.value = '';
+    const schedFields = $('schedule-fields');
+    if (schedFields) schedFields.style.display = 'none';
+    $('schedule-toggle')?.classList.remove('active');
+
     // Clear pending after short delay
     setTimeout(() => pendingTasks.delete(result.id), 3000);
   }
@@ -587,6 +674,41 @@ $('add-task-form').onsubmit = e => {
   $('task-input').value = '';
   $('task-input').focus();
 };
+
+// ========== SCHEDULE TOGGLE ==========
+$('schedule-toggle')?.addEventListener('click', () => {
+  const fields = $('schedule-fields');
+  const btn = $('schedule-toggle');
+  const visible = fields.style.display !== 'none';
+  fields.style.display = visible ? 'none' : 'flex';
+  btn.classList.toggle('active', !visible);
+});
+
+// ========== GOOGLE CALENDAR TOGGLE ==========
+async function checkGoogleCalendarStatus() {
+  const data = await api('/api/google/status');
+  if (!data) return;
+  const statusEl = $('gcal-status');
+  const toggleEl = $('gcal-toggle');
+  if (!data.available) {
+    if (toggleEl) toggleEl.style.display = 'none';
+    return;
+  }
+  if (statusEl) statusEl.textContent = data.connected ? 'ON' : 'OFF';
+}
+
+$('gcal-toggle')?.addEventListener('click', async () => {
+  const data = await api('/api/google/status');
+  if (!data || !data.available) return;
+  if (data.connected) {
+    if (confirm('Disconnect Google Calendar?')) {
+      await api('/api/google/disconnect', { method: 'POST' });
+      $('gcal-status').textContent = 'OFF';
+    }
+  } else {
+    window.location.href = '/auth/google/connect';
+  }
+});
 
 async function toggleSetting(key, transform = v => !v) {
   if (key === 'sound') initAudio();
@@ -1362,6 +1484,8 @@ loadState().then(() => {
   $('task-input').focus();
   // Connect to WebSocket after initial load
   connectWebSocket();
+  // Check Google Calendar connection
+  checkGoogleCalendarStatus();
 });
 
 // ========== AUTO-REFRESH ==========

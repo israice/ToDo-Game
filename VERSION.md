@@ -57,3 +57,4 @@ v0.0.42 - improved configuration loading
 v0.0.43 - version update test 1
 v0.0.44 - changed to english version
 v0.0.45 - added data of start and deadline
+v0.0.46 - added google calendar support

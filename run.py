@@ -1,4 +1,4 @@
-import os, math, uuid, random, hashlib, hmac, subprocess, sqlite3, logging, json
+import os, math, uuid, random, hashlib, hmac, subprocess, sqlite3, logging, json, asyncio
 import warnings
 from datetime import datetime, date
 from typing import Optional
@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 import bcrypt
 from itsdangerous import URLSafeTimedSerializer
 import uvicorn
-from SETTINGS import APP_DEBUG, PORT, BRANCH as DEFAULT_BRANCH
+from SETTINGS import APP_DEBUG, PORT, BRANCH as DEFAULT_BRANCH, GOOGLE_CALENDAR_SYNC_INTERVAL
 
 # Suppress all dependency warnings
 warnings.filterwarnings('ignore')
@@ -59,6 +59,12 @@ templates = Jinja2Templates(directory="FRONTEND")
 # Config
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 BRANCH = os.environ.get("BRANCH", DEFAULT_BRANCH)
+
+# Google Calendar integration (optional)
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI", "")
+GOOGLE_CALENDAR_ENABLED = bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
 
 # Media uploads configuration
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'DATA', 'UPLOADS')
@@ -152,8 +158,6 @@ async def send_user_event(user_id: int, event_type: str, data: dict, source_sess
 # ============== File Watcher (debug mode only) ==============
 
 if APP_DEBUG:
-    import asyncio
-
     _watched_mtimes: dict[str, float] = {}
     WATCH_PATHS = ['FRONTEND', 'BACKEND', 'run.py', 'SETTINGS.py']
     WATCH_EXTENSIONS = {'.py', '.js', '.css', '.html'}
@@ -252,6 +256,26 @@ def init_db():
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE);
             CREATE INDEX IF NOT EXISTS idx_api_tokens ON api_tokens(token);
+        ''')
+
+        # Google Calendar migration: add schedule columns to tasks
+        cursor = conn.execute("PRAGMA table_info(tasks)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        for col in ['scheduled_start', 'scheduled_end', 'google_event_id']:
+            if col not in existing_cols:
+                conn.execute(f'ALTER TABLE tasks ADD COLUMN {col} TEXT')
+
+        conn.executescript('''
+            CREATE TABLE IF NOT EXISTS google_tokens (
+                user_id INTEGER PRIMARY KEY,
+                access_token TEXT NOT NULL,
+                refresh_token TEXT,
+                token_expiry TEXT,
+                calendar_id TEXT DEFAULT 'primary',
+                sync_token TEXT,
+                last_sync_at TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE);
+            CREATE INDEX IF NOT EXISTS idx_tasks_google_event ON tasks(google_event_id);
         ''')
 
 # ============== Auth Dependencies ==============
@@ -509,8 +533,9 @@ async def api_get_state(user_id: int = Depends(get_authenticated_user)):
         progress = get_or_create_progress(conn, user_id)
         media_map = {m['task_id']: {'type': m['media_type'], 'url': f"/UPLOADS/{m['filename']}"}
                      for m in conn.execute('SELECT task_id, media_type, filename FROM task_media WHERE user_id = ?', (user_id,))}
-        tasks = [{'id': t['id'], 'text': t['text'], 'xp': t['xp_reward'], 'media': media_map.get(t['id'])}
-                 for t in conn.execute('SELECT id, text, xp_reward FROM tasks WHERE user_id = ? ORDER BY created_at DESC', (user_id,))]
+        tasks = [{'id': t['id'], 'text': t['text'], 'xp': t['xp_reward'], 'media': media_map.get(t['id']),
+                  'scheduled_start': t['scheduled_start'], 'scheduled_end': t['scheduled_end']}
+                 for t in conn.execute('SELECT id, text, xp_reward, scheduled_start, scheduled_end FROM tasks WHERE user_id = ? ORDER BY created_at DESC', (user_id,))]
         achievements = {a['achievement_id']: True for a in conn.execute('SELECT achievement_id FROM user_achievements WHERE user_id = ?', (user_id,))}
         return JSONResponse({
             'tasks': tasks, 'level': progress['level'], 'xp': progress['xp'], 'xpMax': progress['xp_max'],
@@ -536,23 +561,44 @@ async def api_create_task(request: Request, user_id: int = Depends(get_authentic
         return error_response(f'Task text must be at most {MAX_TASK_TEXT_LENGTH} characters')
     task_id = f"{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
     xp = random.randint(20, 35)
+    scheduled_start = data.get('scheduled_start') or None
+    scheduled_end = data.get('scheduled_end') or None
 
+    google_event_id = None
     with get_db() as conn:
-        conn.execute('INSERT INTO tasks (id, user_id, text, xp_reward) VALUES (?, ?, ?, ?)',
-                     (task_id, user_id, data['text'].strip(), xp))
+        conn.execute('INSERT INTO tasks (id, user_id, text, xp_reward, scheduled_start, scheduled_end) VALUES (?, ?, ?, ?, ?, ?)',
+                     (task_id, user_id, data['text'].strip(), xp, scheduled_start, scheduled_end))
         progress = get_or_create_progress(conn, user_id)
         new_xp, new_level, new_xp_max, leveled_up = apply_xp(progress, 3)
         conn.execute('UPDATE user_progress SET xp=?, level=?, xp_max=? WHERE user_id=?',
                      (new_xp, new_level, new_xp_max, user_id))
+
+        # Sync to Google Calendar
+        if GOOGLE_CALENDAR_ENABLED:
+            from BACKEND.google_calendar import get_google_credentials, get_calendar_service, create_calendar_event
+            creds = get_google_credentials(conn, user_id, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
+            if creds:
+                try:
+                    service = get_calendar_service(creds)
+                    cal_row = conn.execute('SELECT calendar_id FROM google_tokens WHERE user_id = ?', (user_id,)).fetchone()
+                    cal_id = cal_row['calendar_id'] if cal_row else 'primary'
+                    google_event_id = create_calendar_event(service, cal_id, data['text'].strip(), scheduled_start, scheduled_end)
+                    if google_event_id:
+                        conn.execute('UPDATE tasks SET google_event_id = ? WHERE id = ?', (google_event_id, task_id))
+                except Exception:
+                    logger.error('Failed to sync new task to Google Calendar', exc_info=True)
+
         conn.commit()
 
     await send_user_event(user_id, 'task_created', {
         'id': task_id, 'text': data['text'].strip(), 'xp': xp,
+        'scheduled_start': scheduled_start, 'scheduled_end': scheduled_end,
         'xpEarned': 3, 'level': new_level, 'currentXp': new_xp, 'xpMax': new_xp_max, 'leveledUp': leveled_up
     })
 
     return JSONResponse({
         'id': task_id, 'text': data['text'].strip(), 'xp': xp,
+        'scheduled_start': scheduled_start, 'scheduled_end': scheduled_end,
         'xpEarned': 3, 'level': new_level, 'currentXp': new_xp, 'xpMax': new_xp_max, 'leveledUp': leveled_up
     })
 
@@ -563,16 +609,66 @@ async def api_update_task(task_id: str, request: Request, user_id: int = Depends
         return error_response('Task text is required')
     if len(data['text'].strip()) > MAX_TASK_TEXT_LENGTH:
         return error_response(f'Task text must be at most {MAX_TASK_TEXT_LENGTH} characters')
+    text = data['text'].strip()
+    scheduled_start = data.get('scheduled_start')
+    scheduled_end = data.get('scheduled_end')
+
     with get_db() as conn:
-        conn.execute('UPDATE tasks SET text = ? WHERE id = ? AND user_id = ?', (data['text'].strip(), task_id, user_id))
+        # Build dynamic update
+        updates = ['text = ?']
+        params = [text]
+        if scheduled_start is not None:
+            updates.append('scheduled_start = ?')
+            params.append(scheduled_start or None)
+        if scheduled_end is not None:
+            updates.append('scheduled_end = ?')
+            params.append(scheduled_end or None)
+        params.extend([task_id, user_id])
+        conn.execute(f'UPDATE tasks SET {", ".join(updates)} WHERE id = ? AND user_id = ?', params)
+
+        # Sync to Google Calendar
+        if GOOGLE_CALENDAR_ENABLED:
+            task = conn.execute('SELECT google_event_id, scheduled_start, scheduled_end FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
+            if task and task['google_event_id']:
+                from BACKEND.google_calendar import get_google_credentials, get_calendar_service, update_calendar_event
+                creds = get_google_credentials(conn, user_id, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
+                if creds:
+                    try:
+                        service = get_calendar_service(creds)
+                        cal_row = conn.execute('SELECT calendar_id FROM google_tokens WHERE user_id = ?', (user_id,)).fetchone()
+                        cal_id = cal_row['calendar_id'] if cal_row else 'primary'
+                        update_calendar_event(service, cal_id, task['google_event_id'], text, task['scheduled_start'], task['scheduled_end'])
+                    except Exception:
+                        logger.error('Failed to sync task update to Google Calendar', exc_info=True)
+
         conn.commit()
 
-    await send_user_event(user_id, 'task_updated', {'id': task_id, 'text': data['text'].strip()})
+    event_data = {'id': task_id, 'text': text}
+    if scheduled_start is not None:
+        event_data['scheduled_start'] = scheduled_start or None
+    if scheduled_end is not None:
+        event_data['scheduled_end'] = scheduled_end or None
+    await send_user_event(user_id, 'task_updated', event_data)
     return JSONResponse({'success': True})
 
 @app.delete('/api/tasks/{task_id}')
 async def api_delete_task(task_id: str, user_id: int = Depends(get_authenticated_user)):
     with get_db() as conn:
+        # Sync to Google Calendar before deleting
+        if GOOGLE_CALENDAR_ENABLED:
+            task = conn.execute('SELECT google_event_id FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
+            if task and task['google_event_id']:
+                from BACKEND.google_calendar import get_google_credentials, get_calendar_service, delete_calendar_event
+                creds = get_google_credentials(conn, user_id, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
+                if creds:
+                    try:
+                        service = get_calendar_service(creds)
+                        cal_row = conn.execute('SELECT calendar_id FROM google_tokens WHERE user_id = ?', (user_id,)).fetchone()
+                        cal_id = cal_row['calendar_id'] if cal_row else 'primary'
+                        delete_calendar_event(service, cal_id, task['google_event_id'])
+                    except Exception:
+                        logger.error('Failed to sync task deletion to Google Calendar', exc_info=True)
+
         conn.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id))
         conn.commit()
 
@@ -631,6 +727,19 @@ async def api_complete_task(task_id: str, request: Request, user_id: int = Depen
             extra_data = json.dumps({'media_type': media['media_type'], 'media_url': f"/UPLOADS/{media['filename']}"})
             conn.execute('''INSERT INTO activity_log (user_id, activity_type, task_text, xp_earned, extra_data)
                             VALUES (?, 'task_completed', ?, ?, ?)''', (user_id, task['text'], xp_earned, extra_data))
+
+        # Delete Google Calendar event on completion
+        if GOOGLE_CALENDAR_ENABLED and task['google_event_id']:
+            from BACKEND.google_calendar import get_google_credentials, get_calendar_service, delete_calendar_event
+            creds = get_google_credentials(conn, user_id, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
+            if creds:
+                try:
+                    service = get_calendar_service(creds)
+                    cal_row = conn.execute('SELECT calendar_id FROM google_tokens WHERE user_id = ?', (user_id,)).fetchone()
+                    cal_id = cal_row['calendar_id'] if cal_row else 'primary'
+                    delete_calendar_event(service, cal_id, task['google_event_id'])
+                except Exception:
+                    logger.error('Failed to delete calendar event on task completion', exc_info=True)
 
         conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
         conn.commit()
@@ -1051,6 +1160,90 @@ async def api_friends_feed(request: Request, user_id: int = Depends(get_authenti
 
         return JSONResponse({'feed': result, 'has_more': has_more})
 
+# ============== Google Calendar OAuth ==============
+
+def _google_client_config():
+    return {'web': {
+        'client_id': GOOGLE_CLIENT_ID,
+        'client_secret': GOOGLE_CLIENT_SECRET,
+        'auth_uri': 'https://accounts.google.com/o/oauth2/auth',
+        'token_uri': 'https://oauth2.googleapis.com/token',
+        'redirect_uris': [GOOGLE_REDIRECT_URI],
+    }}
+
+@app.get('/auth/google/connect')
+async def google_connect(request: Request, user_id: int = Depends(get_authenticated_user)):
+    if not GOOGLE_CALENDAR_ENABLED:
+        return error_response('Google Calendar integration is not configured', 400)
+    from google_auth_oauthlib.flow import Flow
+    flow = Flow.from_client_config(
+        _google_client_config(),
+        scopes=['https://www.googleapis.com/auth/calendar'],
+        redirect_uri=GOOGLE_REDIRECT_URI,
+    )
+    auth_url, state = flow.authorization_url(
+        access_type='offline',
+        prompt='consent',
+        state=str(user_id),
+    )
+    # Save code_verifier in session for PKCE
+    request.session['google_code_verifier'] = flow.code_verifier
+    return RedirectResponse(auth_url)
+
+@app.get('/auth/google/callback')
+async def google_callback(request: Request):
+    if not GOOGLE_CALENDAR_ENABLED:
+        return error_response('Google Calendar integration is not configured', 400)
+    code = request.query_params.get('code')
+    user_id_str = request.query_params.get('state')
+    if not code or not user_id_str:
+        return error_response('Invalid callback parameters', 400)
+    try:
+        user_id = int(user_id_str)
+    except ValueError:
+        return error_response('Invalid state parameter', 400)
+
+    from google_auth_oauthlib.flow import Flow
+    flow = Flow.from_client_config(
+        _google_client_config(),
+        scopes=['https://www.googleapis.com/auth/calendar'],
+        redirect_uri=GOOGLE_REDIRECT_URI,
+    )
+    # Restore code_verifier from session for PKCE
+    flow.code_verifier = request.session.pop('google_code_verifier', None)
+    flow.fetch_token(code=code)
+    creds = flow.credentials
+
+    with get_db() as conn:
+        conn.execute('''
+            INSERT INTO google_tokens (user_id, access_token, refresh_token, token_expiry)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                access_token = excluded.access_token,
+                refresh_token = excluded.refresh_token,
+                token_expiry = excluded.token_expiry
+        ''', (user_id, creds.token, creds.refresh_token,
+              creds.expiry.isoformat() if creds.expiry else None))
+        conn.commit()
+
+    return RedirectResponse('/')
+
+@app.post('/api/google/disconnect')
+async def google_disconnect(user_id: int = Depends(get_authenticated_user)):
+    with get_db() as conn:
+        conn.execute('DELETE FROM google_tokens WHERE user_id = ?', (user_id,))
+        conn.execute('UPDATE tasks SET google_event_id = NULL WHERE user_id = ?', (user_id,))
+        conn.commit()
+    return JSONResponse({'success': True})
+
+@app.get('/api/google/status')
+async def google_status(user_id: int = Depends(get_authenticated_user)):
+    if not GOOGLE_CALENDAR_ENABLED:
+        return JSONResponse({'connected': False, 'available': False})
+    with get_db() as conn:
+        row = conn.execute('SELECT user_id FROM google_tokens WHERE user_id = ?', (user_id,)).fetchone()
+    return JSONResponse({'connected': row is not None, 'available': True})
+
 # ============== WebSocket ==============
 
 @app.websocket("/ws")
@@ -1183,6 +1376,124 @@ def graceful_reload():
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
     )
+
+# ============== Google Calendar Background Sync ==============
+
+async def _calendar_sync_loop():
+    """Periodically poll Google Calendar for changes and sync to app."""
+    if not GOOGLE_CALENDAR_ENABLED:
+        return
+    logger.info('Google Calendar sync loop started (interval: %ds)', GOOGLE_CALENDAR_SYNC_INTERVAL)
+    await asyncio.sleep(10)  # Wait for app to fully start
+    while True:
+        try:
+            await _do_calendar_sync()
+        except Exception:
+            logger.error('Calendar sync loop error', exc_info=True)
+        await asyncio.sleep(GOOGLE_CALENDAR_SYNC_INTERVAL)
+
+async def _do_calendar_sync():
+    """Run one round of Google Calendar → App sync for all connected users."""
+    from BACKEND.google_calendar import (
+        get_google_credentials, get_calendar_service, sync_calendar_events,
+        parse_event_times, strip_prefix
+    )
+
+    def _sync_user(user_id, sync_token, calendar_id):
+        with get_db() as conn:
+            creds = get_google_credentials(conn, user_id, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
+            if not creds:
+                return None
+            service = get_calendar_service(creds)
+            events, new_token, is_full = sync_calendar_events(service, calendar_id, sync_token)
+            return conn, creds, service, events, new_token, is_full
+
+    with get_db() as conn:
+        users = conn.execute('SELECT user_id, sync_token, calendar_id FROM google_tokens').fetchall()
+
+    for user_row in users:
+        user_id = user_row['user_id']
+        sync_token = user_row['sync_token']
+        calendar_id = user_row['calendar_id'] or 'primary'
+
+        try:
+            with get_db() as conn:
+                creds = get_google_credentials(conn, user_id, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
+                if not creds:
+                    continue
+
+            service = await asyncio.to_thread(get_calendar_service, creds)
+            events, new_token, is_full = await asyncio.to_thread(
+                sync_calendar_events, service, calendar_id, sync_token
+            )
+
+            if not events and not new_token:
+                continue
+
+            with get_db() as conn:
+                for event in events:
+                    event_id = event.get('id')
+                    summary = event.get('summary', '')
+                    status = event.get('status')
+
+                    # Only process events with our prefix or events we created
+                    existing_task = conn.execute(
+                        'SELECT id, text FROM tasks WHERE google_event_id = ? AND user_id = ?',
+                        (event_id, user_id)
+                    ).fetchone()
+
+                    if status == 'cancelled':
+                        # Event deleted in Calendar → delete task
+                        if existing_task:
+                            conn.execute('DELETE FROM tasks WHERE id = ?', (existing_task['id'],))
+                            conn.commit()
+                            await send_user_event(user_id, 'task_deleted', {'id': existing_task['id']})
+                        continue
+
+                    start_iso, end_iso = parse_event_times(event)
+                    text = strip_prefix(summary)
+                    if not text:
+                        continue
+
+                    if existing_task:
+                        # Event updated → update task
+                        conn.execute(
+                            'UPDATE tasks SET text = ?, scheduled_start = ?, scheduled_end = ? WHERE id = ?',
+                            (text, start_iso, end_iso, existing_task['id'])
+                        )
+                        conn.commit()
+                        await send_user_event(user_id, 'task_updated', {
+                            'id': existing_task['id'], 'text': text,
+                            'scheduled_start': start_iso, 'scheduled_end': end_iso
+                        })
+                    elif start_iso and end_iso:
+                        # New event with dates → create task
+                        task_id = f"{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
+                        xp = random.randint(20, 35)
+                        conn.execute(
+                            'INSERT INTO tasks (id, user_id, text, xp_reward, scheduled_start, scheduled_end, google_event_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                            (task_id, user_id, text, xp, start_iso, end_iso, event_id)
+                        )
+                        conn.commit()
+                        await send_user_event(user_id, 'task_created', {
+                            'id': task_id, 'text': text, 'xp': xp,
+                            'scheduled_start': start_iso, 'scheduled_end': end_iso,
+                        })
+
+                # Update sync token
+                if new_token:
+                    conn.execute(
+                        'UPDATE google_tokens SET sync_token = ?, last_sync_at = ? WHERE user_id = ?',
+                        (new_token, datetime.now().isoformat(), user_id)
+                    )
+                    conn.commit()
+
+        except Exception:
+            logger.error('Calendar sync failed for user %d', user_id, exc_info=True)
+
+@app.on_event('startup')
+async def start_calendar_sync():
+    asyncio.create_task(_calendar_sync_loop())
 
 # ============== Init ==============
 

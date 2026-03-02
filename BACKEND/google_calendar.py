@@ -1,0 +1,156 @@
+"""Google Calendar API helper functions for ToDo-Game integration."""
+
+import logging
+from datetime import datetime, timezone
+
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+
+logger = logging.getLogger(__name__)
+
+SCOPES = ['https://www.googleapis.com/auth/calendar']
+
+
+def get_google_credentials(conn, user_id, client_id, client_secret):
+    """Build Credentials from stored tokens, auto-refreshing if expired."""
+    row = conn.execute(
+        'SELECT access_token, refresh_token, token_expiry FROM google_tokens WHERE user_id = ?',
+        (user_id,)
+    ).fetchone()
+    if not row:
+        return None
+
+    creds = Credentials(
+        token=row['access_token'],
+        refresh_token=row['refresh_token'],
+        token_uri='https://oauth2.googleapis.com/token',
+        client_id=client_id,
+        client_secret=client_secret,
+        scopes=SCOPES,
+    )
+
+    if creds.expired and creds.refresh_token:
+        from google.auth.transport.requests import Request
+        creds.refresh(Request())
+        conn.execute(
+            'UPDATE google_tokens SET access_token = ?, token_expiry = ? WHERE user_id = ?',
+            (creds.token, creds.expiry.isoformat() if creds.expiry else None, user_id)
+        )
+        conn.commit()
+
+    return creds
+
+
+def get_calendar_service(creds):
+    """Build a Google Calendar API service object."""
+    return build('calendar', 'v3', credentials=creds, cache_discovery=False)
+
+
+def task_to_event(text, start_iso, end_iso):
+    """Convert task data to a Google Calendar event dict."""
+    event = {'summary': text}
+
+    if start_iso:
+        if len(start_iso) <= 10:
+            event['start'] = {'date': start_iso}
+        else:
+            event['start'] = {'dateTime': start_iso, 'timeZone': 'UTC'}
+    else:
+        # Default: all-day event for today
+        event['start'] = {'date': datetime.now(timezone.utc).strftime('%Y-%m-%d')}
+
+    if end_iso:
+        if len(end_iso) <= 10:
+            event['end'] = {'date': end_iso}
+        else:
+            event['end'] = {'dateTime': end_iso, 'timeZone': 'UTC'}
+    else:
+        event['end'] = dict(event['start'])
+
+    return event
+
+
+def create_calendar_event(service, calendar_id, text, start_iso, end_iso):
+    """Create a new event in Google Calendar. Returns the event ID."""
+    event = task_to_event(text, start_iso, end_iso)
+    try:
+        result = service.events().insert(calendarId=calendar_id, body=event).execute()
+        return result.get('id')
+    except Exception:
+        logger.error('Failed to create calendar event', exc_info=True)
+        return None
+
+
+def update_calendar_event(service, calendar_id, event_id, text, start_iso, end_iso):
+    """Update an existing event in Google Calendar."""
+    event = task_to_event(text, start_iso, end_iso)
+    try:
+        service.events().update(calendarId=calendar_id, eventId=event_id, body=event).execute()
+        return True
+    except Exception:
+        logger.error('Failed to update calendar event %s', event_id, exc_info=True)
+        return False
+
+
+def delete_calendar_event(service, calendar_id, event_id):
+    """Delete an event from Google Calendar."""
+    try:
+        service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
+        return True
+    except Exception:
+        logger.error('Failed to delete calendar event %s', event_id, exc_info=True)
+        return False
+
+
+def sync_calendar_events(service, calendar_id, sync_token=None):
+    """Fetch changed events using incremental sync.
+
+    Returns (events_list, new_sync_token, is_full_sync).
+    """
+    events = []
+    page_token = None
+    new_sync_token = None
+    is_full_sync = sync_token is None
+
+    try:
+        while True:
+            kwargs = {'calendarId': calendar_id, 'singleEvents': True, 'maxResults': 100}
+            if sync_token and not is_full_sync:
+                kwargs['syncToken'] = sync_token
+            else:
+                # Full sync: only get recent events
+                kwargs['timeMin'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+            if page_token:
+                kwargs['pageToken'] = page_token
+
+            result = service.events().list(**kwargs).execute()
+            events.extend(result.get('items', []))
+            page_token = result.get('nextPageToken')
+            if not page_token:
+                new_sync_token = result.get('nextSyncToken')
+                break
+
+    except Exception as e:
+        error_str = str(e)
+        if '410' in error_str or 'Gone' in error_str:
+            # syncToken invalidated, do full sync
+            logger.info('Sync token expired, performing full sync')
+            return sync_calendar_events(service, calendar_id, sync_token=None)
+        logger.error('Failed to sync calendar events', exc_info=True)
+        return [], None, is_full_sync
+
+    return events, new_sync_token, is_full_sync
+
+
+def parse_event_times(event):
+    """Extract start and end ISO strings from a Google Calendar event."""
+    start = event.get('start', {})
+    end = event.get('end', {})
+    start_iso = start.get('dateTime') or start.get('date')
+    end_iso = end.get('dateTime') or end.get('date')
+    return start_iso, end_iso
+
+
+def strip_prefix(summary):
+    """Return event summary as-is (kept for API compatibility)."""
+    return summary or ''

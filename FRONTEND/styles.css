@@ -218,6 +218,38 @@ body {
   }
 }
 
+/* ===== SCHEDULE FIELDS ===== */
+.schedule-toggle-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; min-width: 32px;
+  background: var(--bg-card); border: 1px solid var(--border-color);
+  border-radius: 8px; cursor: pointer; font-size: 1rem;
+  transition: all var(--transition-fast); color: var(--text-secondary);
+
+  &:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+  &.active { background: var(--accent-primary); border-color: var(--accent-primary); color: white; }
+}
+
+.schedule-fields {
+  display: flex; gap: 8px; padding: 6px 0 0;
+
+  .schedule-label {
+    flex: 1; display: flex; flex-direction: column; gap: 2px;
+
+    span { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+
+    input[type="datetime-local"] {
+      width: 100%; padding: 4px 6px;
+      background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px;
+      color: var(--text-primary); font-size: 0.8rem;
+      outline: none; transition: border-color var(--transition-fast);
+      color-scheme: dark;
+
+      &:focus { border-color: var(--accent-primary); }
+    }
+  }
+}
+
 /* ===== TASKS ===== */
 .tasks-section {
   background: var(--bg-secondary); border-radius: 12px;
