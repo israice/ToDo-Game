@@ -54,3 +54,4 @@ v0.0.39 - server test 5
 v0.0.40 - server test 6
 v0.0.41 - improved documentation behavior
 v0.0.42 - improved configuration loading
+v0.0.43 - version update test 1
