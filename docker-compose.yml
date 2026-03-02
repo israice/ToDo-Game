@@ -16,16 +16,16 @@ services:
       - DOCKER_API_VERSION=1.44
       # BWS loads secrets at startup (SECRET_KEY, WEBHOOK_SECRET, etc.)
       - BITWARDEN_ENABLED=${BITWARDEN_ENABLED:-0}
-      - BWS_ACCESS_TOKEN=${BWS_ACCESS_TOKEN}
-      - BWS_PROJECT_ID=${BWS_PROJECT_ID}
+      - BWS_ACCESS_TOKEN=${BWS_ACCESS_TOKEN:-}
+      - BWS_PROJECT_ID=${BWS_PROJECT_ID:-}
       - BWS_REQUIRE_WRITE=${BWS_REQUIRE_WRITE:-0}
       - BWS_SECRET_KEY=${BWS_SECRET_KEY:-SECRET_KEY}
       - BWS_WEBHOOK_SECRET=${BWS_WEBHOOK_SECRET:-WEBHOOK_SECRET}
       - BWS_TELEGRAM_BOT_TOKEN=${BWS_TELEGRAM_BOT_TOKEN:-TELEGRAM_BOT_TOKEN}
       - BWS_ADMIN_TELEGRAM_ID=${BWS_ADMIN_TELEGRAM_ID:-ADMIN_TELEGRAM_ID}
       # Fallback (used only if BWS disabled)
-      - SECRET_KEY=${SECRET_KEY}
-      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - SECRET_KEY=${SECRET_KEY:-}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
     healthcheck:
       test: ["CMD", "curl", "-fsSL", "http://localhost:5000/.well-known/health"]
       interval: 10s
@@ -44,13 +44,13 @@ services:
       - bot_data:/app/data
       - node_modules:/app/node_modules
     environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - API_URL=http://web:5000  # Docker override; source of truth: SETTINGS.py
-      - ADMIN_TELEGRAM_ID=${ADMIN_TELEGRAM_ID}
+      - ADMIN_TELEGRAM_ID=${ADMIN_TELEGRAM_ID:-}
       # BWS (if enabled, bot reads tokens from .env populated by web service)
       - BITWARDEN_ENABLED=${BITWARDEN_ENABLED:-0}
-      - BWS_ACCESS_TOKEN=${BWS_ACCESS_TOKEN}
-      - BWS_PROJECT_ID=${BWS_PROJECT_ID}
+      - BWS_ACCESS_TOKEN=${BWS_ACCESS_TOKEN:-}
+      - BWS_PROJECT_ID=${BWS_PROJECT_ID:-}
     depends_on:
       web:
         condition: service_healthy

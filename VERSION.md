@@ -46,3 +46,4 @@ v0.0.31 - more ative tasks in list less paddings
 v0.0.32 - test 1
 v0.0.33 - test 2
 v0.0.34 - changed to FastAPI and Bitwarden support
+v0.0.35 - server test 1
