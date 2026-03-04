@@ -17,133 +17,151 @@
         <!-- Particles container for effects -->
         <div id="particles"></div>
 
-        <!-- Compact horizontal header -->
-        <header class="game-header" id="game-header">
-            <div class="level-row">
-                <div class="level-badge">
-                    <span class="level-icon">&#9733;</span>
-                    <span class="level-text">LVL <span id="level">1</span></span>
+        <!-- Combo indicator -->
+        <div class="combo-container" id="combo-container">
+            <span class="combo-fire">&#128293;</span>
+            <span class="combo-count">x<span id="combo">0</span></span>
+        </div>
+
+        <div class="xp-row">
+            <div class="level-badge">
+                <span class="level-icon">&#9733;</span>
+                <span class="level-text">LVL <span id="level-top">1</span></span>
+            </div>
+            <div class="xp-container-full">
+                <div class="xp-bar">
+                    <div class="xp-fill" id="xp-fill"></div>
+                    <span class="xp-text"><span id="xp">0</span>/<span id="xp-max">100</span></span>
                 </div>
-                <div class="xp-container">
-                    <div class="xp-bar">
-                        <div class="xp-fill" id="xp-fill"></div>
-                        <span class="xp-text"><span id="xp">0</span>/<span id="xp-max">100</span></span>
-                    </div>
-                </div>
-                <div class="stats-mini">
-                    <div class="stat-item" aria-label="Completed quests">
-                        <span class="stat-icon" aria-hidden="true">&#9989;</span>
-                        <span id="tasks-completed">0</span>
-                    </div>
-                    <div class="stat-item" aria-label="Daily streak">
-                        <span class="stat-icon" aria-hidden="true">&#128293;</span>
-                        <span id="streak-count">0</span>
-                    </div>
-                    <div class="stat-item" aria-label="Achievements">
-                        <span class="stat-icon" aria-hidden="true">&#127942;</span>
-                        <span id="achievements-count">0</span>
-                    </div>
-                </div>
-                <!-- Settings button with dropdown -->
-                <div class="settings-wrapper">
-                    <button class="settings-btn" id="settings-toggle" aria-label="User">
-                        <span class="user-icon"></span>
-                    </button>
-                    <div class="settings-dropdown" id="settings-dropdown">
+            </div>
+            <div class="settings-wrapper">
+                <button class="settings-btn" id="settings-toggle" aria-label="User">
+                    <span class="user-icon"></span>
+                </button>
+                <div class="settings-dropdown" id="settings-dropdown">
+                    <!-- Profile + Level -->
+                    <div class="menu-profile-row">
                         <button class="settings-item" id="user-profile-btn">
                             <span class="user-icon"></span>
                             <span class="settings-label">{{ user }}</span>
                         </button>
-                        <div class="settings-divider"></div>
-                        <button class="settings-item" id="sound-toggle">
-                            <span id="sound-icon">&#128264;</span>
-                            <span class="settings-label">Sound</span>
-                            <span class="settings-status" id="sound-status">OFF</span>
-                        </button>
-                        <div class="settings-divider"></div>
-                        <button class="settings-item" id="version-btn">
-                            <span>&#128736;</span>
-                            <span class="settings-label">Version</span>
-                            <span class="settings-status">{{ version }}</span>
-                        </button>
-                        <div class="settings-divider"></div>
+                        <div class="level-badge">
+                            <span class="level-icon">&#9733;</span>
+                            <span class="level-text">LVL <span id="level">1</span></span>
+                        </div>
+                    </div>
+                    <div class="settings-divider"></div>
+
+                    <!-- Stats -->
+                    <div class="menu-stats">
+                        <div class="stat-item" aria-label="Completed quests">
+                            <span class="stat-icon" aria-hidden="true">&#9989;</span>
+                            <span id="tasks-completed">0</span>
+                        </div>
+                        <div class="stat-item" aria-label="Daily streak">
+                            <span class="stat-icon" aria-hidden="true">&#128293;</span>
+                            <span id="streak-count">0</span>
+                        </div>
+                        <div class="stat-item" aria-label="Achievements">
+                            <span class="stat-icon" aria-hidden="true">&#127942;</span>
+                            <span id="achievements-count">0</span>
+                        </div>
+                    </div>
+                    <div class="settings-divider"></div>
+
+                    <!-- Add task form -->
+                    <form class="add-task-form" id="add-task-form" role="form" aria-label="Add new quest">
+                        <div class="input-wrapper">
+                            <input
+                                type="text"
+                                id="task-input"
+                                placeholder="New quest..."
+                                autocomplete="off"
+                                maxlength="100"
+                            >
+                            <button type="button" class="schedule-toggle-btn" id="schedule-toggle" aria-label="Set schedule" title="Set schedule">&#128197;</button>
+                            <button type="submit" class="add-btn" id="add-btn">
+                                <span class="btn-icon">+</span>
+                            </button>
+                        </div>
+                        <div class="schedule-fields" id="schedule-fields" style="display:none;">
+                            <label class="schedule-label">
+                                <span>Start</span>
+                                <input type="datetime-local" id="schedule-start">
+                            </label>
+                            <label class="schedule-label">
+                                <span>Deadline</span>
+                                <input type="datetime-local" id="schedule-end">
+                            </label>
+                        </div>
+                    </form>
+                    <div class="settings-divider"></div>
+
+                    <!-- Tabs -->
+                    <button class="settings-item tab-btn active" data-tab="todo" role="tab" aria-selected="true" aria-controls="tab-todo">
+                        <span>&#128203;</span>
+                        <span class="settings-label">TODO</span>
+                    </button>
+                    <button class="settings-item tab-btn" data-tab="social" role="tab" aria-selected="false" aria-controls="tab-social">
+                        <span>&#128101;</span>
+                        <span class="settings-label">SOCIAL</span>
+                    </button>
+                    <button class="settings-item tab-btn" data-tab="history" role="tab" aria-selected="false" aria-controls="tab-history">
+                        <span>&#128220;</span>
+                        <span class="settings-label">HISTORY</span>
+                    </button>
+                    <button class="settings-item tab-btn" data-tab="achievements" role="tab" aria-selected="false" aria-controls="tab-achievements">
+                        <span>&#127942;</span>
+                        <span class="settings-label">Achievements</span>
+                    </button>
+                    <div class="settings-divider"></div>
+                    <div class="settings-item-wrapper">
                         <button class="settings-item" id="settings-btn">
                             <span>&#9881;</span>
                             <span class="settings-label">Settings</span>
                         </button>
-                        <div class="settings-divider"></div>
-                        <button class="settings-item" id="gcal-toggle">
-                            <span>&#128197;</span>
-                            <span class="settings-label">Google Calendar</span>
-                            <span class="settings-status" id="gcal-status">OFF</span>
-                        </button>
-                        <div class="settings-divider"></div>
-                        <a href="/logout" class="settings-item settings-logout">
-                            <span>&#128682;</span>
-                            <span class="settings-label">Logout</span>
-                        </a>
+                        <div class="settings-submenu">
+                            <button class="settings-item" id="sound-toggle">
+                                <span id="sound-icon">&#128264;</span>
+                                <span class="settings-label">Sound</span>
+                                <span class="settings-status" id="sound-status">OFF</span>
+                            </button>
+                            <div class="settings-divider"></div>
+                            <button class="settings-item" id="gcal-toggle">
+                                <span>&#128197;</span>
+                                <span class="settings-label">Google Calendar</span>
+                                <span class="settings-status" id="gcal-status">OFF</span>
+                            </button>
+                        </div>
                     </div>
+                    <div class="settings-divider"></div>
+                    <button class="settings-item" id="version-btn">
+                        <span>&#128736;</span>
+                        <span class="settings-label">Version</span>
+                        <span class="settings-status">{{ version }}</span>
+                    </button>
+                    <div class="settings-divider"></div>
+                    <a href="/logout" class="settings-item settings-logout">
+                        <span>&#128682;</span>
+                        <span class="settings-label">Logout</span>
+                    </a>
                 </div>
             </div>
-
-            <div class="header-right">
-                <!-- Combo indicator -->
-                <div class="combo-container" id="combo-container">
-                    <span class="combo-fire">&#128293;</span>
-                    <span class="combo-count">x<span id="combo">0</span></span>
-                </div>
-            </div>
-
-        </header>
+        </div>
 
         <!-- Main content -->
         <main class="main-content">
-            <!-- Tabs Navigation Container -->
-            <div class="tabs-container" id="tabs-container">
-                <nav class="tabs-nav" id="tabs-nav" role="tablist">
-                    <button class="tab-btn active" data-tab="todo" role="tab" aria-selected="true" aria-controls="tab-todo">TODO</button>
-                    <button class="tab-btn" data-tab="social" role="tab" aria-selected="false" aria-controls="tab-social">SOCIAL</button>
-                    <button class="tab-btn" data-tab="history" role="tab" aria-selected="false" aria-controls="tab-history">HISTORY</button>
-                </nav>
-                <div class="search-input-wrapper social-search" id="social-search">
-                    <input type="text" id="user-search-input"
-                           placeholder="Search users..."
-                           autocomplete="off" minlength="2">
-                    <button class="search-btn" id="user-search-btn">
-                        <span>&#128269;</span>
-                    </button>
-                </div>
+            <div class="search-input-wrapper social-search" id="social-search">
+                <input type="text" id="user-search-input"
+                       placeholder="Search users..."
+                       autocomplete="off" minlength="2">
+                <button class="search-btn" id="user-search-btn">
+                    <span>&#128269;</span>
+                </button>
             </div>
 
             <!-- Tab: TODO -->
             <div class="tab-content" id="tab-todo" role="tabpanel" style="display: block;">
-                <!-- Add task form -->
-                <form class="add-task-form" id="add-task-form" role="form" aria-label="Add new quest">
-                    <div class="input-wrapper">
-                        <input
-                            type="text"
-                            id="task-input"
-                            placeholder="What quest awaits you today?"
-                            autocomplete="off"
-                            maxlength="100"
-                        >
-                        <button type="button" class="schedule-toggle-btn" id="schedule-toggle" aria-label="Set schedule" title="Set schedule">&#128197;</button>
-                        <button type="submit" class="add-btn" id="add-btn">
-                            <span class="btn-icon">+</span>
-                            <span class="btn-text">Add</span>
-                        </button>
-                    </div>
-                    <div class="schedule-fields" id="schedule-fields" style="display:none;">
-                        <label class="schedule-label">
-                            <span>Start</span>
-                            <input type="datetime-local" id="schedule-start">
-                        </label>
-                        <label class="schedule-label">
-                            <span>Deadline</span>
-                            <input type="datetime-local" id="schedule-end">
-                        </label>
-                    </div>
-                </form>
 
                 <!-- Tasks list -->
                 <div class="tasks-section">
@@ -155,15 +173,6 @@
                         <div class="skeleton-task"></div>
                     </div>
 
-                    <div class="tasks-header" id="tasks-header">
-                        <span class="th-media"></span>
-                        <span class="th-check"></span>
-                        <input type="text" class="th-search" id="task-search" placeholder="Search..." autocomplete="off">
-                        <span class="th-xp">XP</span>
-                        <span class="th-date">Start</span>
-                        <span class="th-date">Deadline</span>
-                        <span class="th-delete"></span>
-                    </div>
                     <ul class="tasks-list" id="tasks-list" role="list" aria-live="polite">
                         <!-- Tasks will be rendered here -->
                     </ul>
@@ -174,8 +183,10 @@
                         <p class="empty-hint">Add your first quest above</p>
                     </div>
                 </div>
+            </div>
 
-                <!-- Achievements panel -->
+            <!-- Tab: ACHIEVEMENTS -->
+            <div class="tab-content" id="tab-achievements" role="tabpanel" style="display: none;">
                 <aside class="achievements-panel" id="achievements-panel">
                     <h3 class="panel-title">
                         <span>&#127942;</span> Achievements

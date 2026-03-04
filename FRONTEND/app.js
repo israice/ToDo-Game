@@ -36,6 +36,9 @@ let videoObserver = null;
 let isMobileDevice = false;
 const MOBILE_BREAKPOINT = 768;
 
+// Drag-scroll offset for tasks carousel
+let scrollOffset = 0;
+
 // ========== UTILITIES ==========
 function debounce(fn, delay) {
   let timer;
@@ -330,6 +333,7 @@ function updateUI() {
   const txt = { level: state.level, xp: state.xp, 'xp-max': state.xpMax, 'tasks-completed': state.completed,
     'streak-count': state.streak, 'achievements-count': Object.keys(state.achievements).length };
   for (const [id, val] of Object.entries(txt)) { const el = $(id); if (el) el.textContent = val; }
+  const lvlTop = $('level-top'); if (lvlTop) lvlTop.textContent = state.level;
   const xpFill = $('xp-fill'); if (xpFill) xpFill.style.width = (state.xp / state.xpMax * 100) + '%';
   $('combo-container').classList.toggle('active', state.combo > 0);
   if (state.combo > 0) $('combo').textContent = state.combo;
@@ -354,19 +358,13 @@ function getHourFromISO(iso) {
 }
 
 // ========== RENDER TASKS ==========
-let _taskSearchQuery = '';
-
 function renderTasks() {
   const list = $('tasks-list');
   list.textContent = '';
   const empty = state.tasks.length === 0;
   $('empty-state').classList.toggle('show', empty);
-  $('tasks-header').style.display = empty ? 'none' : '';
 
-  const query = _taskSearchQuery.toLowerCase();
-  const filtered = query ? state.tasks.filter(t => t.text.toLowerCase().includes(query)) : state.tasks;
-
-  const sorted = [...filtered].sort((a, b) => {
+  const sorted = [...state.tasks].sort((a, b) => {
     const sa = a.scheduled_start || '';
     const sb = b.scheduled_start || '';
     if (sa && sb) return sa.localeCompare(sb);
@@ -375,11 +373,49 @@ function renderTasks() {
     return 0;
   });
 
-  sorted.forEach((task) => {
+  // Clamp scrollOffset to valid range
+  const minOffset = -5;
+  const maxOffset = Math.max(0, sorted.length - 6);
+  scrollOffset = Math.max(minOffset, Math.min(maxOffset, scrollOffset));
+
+  for (let idx = 0; idx < 11; idx++) {
+    const taskIdx = scrollOffset + idx;
+    const dist = Math.abs(idx - 5);
+    const widthPct = [100, 99, 97, 95, 92, 90][dist];
+    const height = [40, 37, 33, 28, 24, 20][dist];
+    const fontSize = [0.85, 0.82, 0.78, 0.73, 0.68, 0.63][dist];
+
+    // Placeholder if out of bounds
+    if (taskIdx < 0 || taskIdx >= sorted.length) {
+      const li = document.createElement('li');
+      li.className = 'task-item placeholder';
+      li.style.width = widthPct + '%';
+      li.style.height = height + 'px';
+      li.style.minHeight = height + 'px';
+      li.style.maxHeight = height + 'px';
+      li.style.overflow = 'hidden';
+      li.style.fontSize = fontSize + 'rem';
+      li.style.padding = Math.max(2, 6 - dist * 2) + 'px';
+      li.style.margin = '0 auto';
+      if (idx === 5) li.style.borderColor = 'var(--accent-fire)';
+      list.appendChild(li);
+      continue;
+    }
+
+    const task = sorted[taskIdx];
     const li = document.createElement('li');
     const hour = getHourFromISO(task.scheduled_start);
     const timePeriod = hour < 0 ? '' : hour < 6 ? 'time-night' : hour < 12 ? 'time-morning' : hour < 18 ? 'time-day' : 'time-evening';
     li.className = 'task-item' + (timePeriod ? ' ' + timePeriod : '');
+    li.style.width = widthPct + '%';
+    li.style.height = height + 'px';
+    li.style.minHeight = height + 'px';
+    li.style.maxHeight = height + 'px';
+    li.style.overflow = 'hidden';
+    li.style.fontSize = fontSize + 'rem';
+    li.style.padding = Math.max(2, 6 - dist * 2) + 'px';
+    li.style.margin = '0 auto';
+    if (idx === 5) li.style.borderColor = 'var(--accent-fire)';
     li.dataset.id = task.id;
 
     const start = formatTaskDate(task.scheduled_start);
@@ -412,10 +448,6 @@ function renderTasks() {
     textSpan.className = 'task-text';
     textSpan.textContent = task.text;
 
-    const xpSpan = document.createElement('span');
-    xpSpan.className = 'task-xp';
-    xpSpan.textContent = '+' + task.xp + ' XP';
-
     const startDateSpan = document.createElement('span');
     startDateSpan.className = 'task-date';
     const startDay = document.createElement('span');
@@ -441,12 +473,11 @@ function renderTasks() {
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'task-delete';
     deleteBtn.setAttribute('aria-label', 'Delete quest');
-    deleteBtn.innerHTML = '&#128465;';
+    deleteBtn.textContent = '\uD83D\uDDD1';
 
     li.appendChild(mediaSpan);
     li.appendChild(checkLabel);
     li.appendChild(textSpan);
-    li.appendChild(xpSpan);
     li.appendChild(startDateSpan);
     li.appendChild(endDateSpan);
     li.appendChild(deleteBtn);
@@ -462,9 +493,79 @@ function renderTasks() {
     textSpan.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); textSpan.blur(); } else if (e.key === 'Escape') { textSpan.textContent = original; textSpan.contentEditable = 'false'; } };
 
     list.appendChild(li);
-  });
+  }
   const taskCount = $('task-count');
   if (taskCount) taskCount.textContent = `(${state.tasks.length})`;
+}
+
+// ========== DRAG-SCROLL FOR TASKS CAROUSEL ==========
+function initTaskDrag() {
+  const list = $('tasks-list');
+  if (!list) return;
+
+  const ROW_PX = 30; // pixels of drag per 1 row shift
+  let startY = 0;
+  let startOffset = 0;
+  let isDragging = false;
+
+  function onPointerMove(e) {
+    if (!isDragging) return;
+    const deltaY = e.clientY - startY;
+
+    // Continuous offset: integer part = which tasks to show, fraction = smooth translate
+    const rawOffset = startOffset - deltaY / ROW_PX;
+    const newOffset = Math.round(rawOffset);
+    const fractionPx = (rawOffset - newOffset) * ROW_PX;
+
+    if (newOffset !== scrollOffset) {
+      scrollOffset = newOffset;
+      renderTasks();
+    }
+
+    // Smooth sub-row translate
+    list.style.transform = 'translateY(' + (-fractionPx) + 'px)';
+  }
+
+  function onPointerUp() {
+    if (!isDragging) return;
+    isDragging = false;
+
+    // Snap back with smooth animation
+    list.style.transition = 'transform 0.2s ease-out';
+    list.style.transform = 'translateY(0)';
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      // Freeze animation:none inline BEFORE removing .dragging
+      // so slide-in doesn't re-trigger when CSS rule stops applying
+      list.querySelectorAll('.task-item').forEach(el => { el.style.animation = 'none'; });
+      list.classList.remove('dragging');
+      list.style.transition = '';
+      list.style.transform = '';
+      list.removeEventListener('transitionend', cleanup);
+    };
+    list.addEventListener('transitionend', cleanup);
+    // Fallback in case transitionend doesn't fire
+    setTimeout(cleanup, 250);
+
+    document.removeEventListener('pointermove', onPointerMove);
+    document.removeEventListener('pointerup', onPointerUp);
+  }
+
+  list.addEventListener('pointerdown', e => {
+    // Skip drag when interacting with buttons, inputs, or editable text
+    if (e.target.closest('button, input, label, [contenteditable="true"]')) return;
+    isDragging = true;
+    startY = e.clientY;
+    startOffset = scrollOffset;
+    list.style.transition = '';
+    list.style.transform = '';
+    list.classList.add('dragging');
+    list.setPointerCapture(e.pointerId);
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerup', onPointerUp);
+  });
 }
 
 // ========== RENDER ACHIEVEMENTS ==========
@@ -525,8 +626,9 @@ async function addTask(text) {
   const body = { text: text.trim() };
   const startInput = $('schedule-start');
   const endInput = $('schedule-end');
-  if (startInput && startInput.value) body.scheduled_start = new Date(startInput.value).toISOString();
-  if (endInput && endInput.value) body.scheduled_end = new Date(endInput.value).toISOString();
+  const nowISO = new Date().toISOString();
+  body.scheduled_start = (startInput && startInput.value) ? new Date(startInput.value).toISOString() : nowISO;
+  body.scheduled_end = (endInput && endInput.value) ? new Date(endInput.value).toISOString() : nowISO;
 
   const result = await api('/api/tasks', {
     method: 'POST',
@@ -754,6 +856,9 @@ function initTabs() {
 
       // Show/hide search for SOCIAL tab
       socialSearch.classList.toggle('show', tabId === 'social');
+
+      // Close dropdown after tab switch
+      sDrop.classList.remove('show');
 
       // Render content if needed
       if (tabId === 'history') renderHistory();
@@ -1468,14 +1573,9 @@ document.head.appendChild(style);
 checkIfMobile();
 if (isMobileDevice) initMobileVideoObserver();
 
-// Initialize task search filter
-$('task-search').addEventListener('input', e => {
-  _taskSearchQuery = e.target.value.trim();
-  renderTasks();
-});
-
-// Initialize tabs
+// Initialize tabs and drag-scroll
 initTabs();
+initTaskDrag();
 initSearch();
 loadHistory();
 

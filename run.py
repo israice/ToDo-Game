@@ -278,6 +278,11 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_tasks_google_event ON tasks(google_event_id);
         ''')
 
+        # Backfill: set scheduled_start/end to created_at where missing
+        conn.execute("UPDATE tasks SET scheduled_start = created_at WHERE scheduled_start IS NULL")
+        conn.execute("UPDATE tasks SET scheduled_end = created_at WHERE scheduled_end IS NULL")
+        conn.commit()
+
 # ============== Auth Dependencies ==============
 
 def get_authenticated_user(request: Request) -> int:
