@@ -42,3 +42,4 @@ v0.0.46 - added google calendar support
 v0.0.47 - Picker Wheel for table
 v0.0.48 - Fullscreen drum roller
 v0.0.49 - added keyboard swiping pages right and left
+v0.0.50 - new screenshots
