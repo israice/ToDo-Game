@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 import bcrypt
 from itsdangerous import URLSafeTimedSerializer
 import uvicorn
-from SETTINGS import APP_DEBUG, PORT, BRANCH as DEFAULT_BRANCH, GOOGLE_CALENDAR_SYNC_INTERVAL
+from SETTINGS import APP_DEBUG, PORT, BRANCH as DEFAULT_BRANCH, GOOGLE_CALENDAR_SYNC_INTERVAL, DRUM_ROW_HEIGHT, DRUM_MAX_TOP_ANGLE, DRUM_PERSPECTIVE_K, DRUM_HIGHLIGHT_OFFSET
 
 # Suppress all dependency warnings
 warnings.filterwarnings('ignore')
@@ -155,46 +155,38 @@ manager = ConnectionManager()
 async def send_user_event(user_id: int, event_type: str, data: dict, source_session_id: Optional[str] = None):
     await manager.broadcast(user_id, event_type, data, source_session_id)
 
-# ============== File Watcher (debug mode only) ==============
+# ============== File Hash (debug mode only) ==============
 
 if APP_DEBUG:
-    _watched_mtimes: dict[str, float] = {}
-    WATCH_PATHS = ['FRONTEND', 'BACKEND', 'run.py', 'SETTINGS.py']
-    WATCH_EXTENSIONS = {'.py', '.js', '.css', '.html'}
+    _WATCH_PATHS = ['FRONTEND', 'BACKEND', 'run.py', 'SETTINGS.py']
+    _WATCH_EXTENSIONS = {'.py', '.js', '.css', '.html'}
 
-    def _collect_files() -> dict[str, float]:
-        result = {}
+    def _compute_files_hash():
+        css_mtimes = []
+        other_mtimes = []
         base = os.path.dirname(__file__)
-        for p in WATCH_PATHS:
+        for p in _WATCH_PATHS:
             full = os.path.join(base, p)
             if os.path.isfile(full):
-                result[full] = os.path.getmtime(full)
+                other_mtimes.append(f"{full}:{os.path.getmtime(full)}")
             elif os.path.isdir(full):
                 for root, _, files in os.walk(full):
-                    for f in files:
-                        if os.path.splitext(f)[1] in WATCH_EXTENSIONS:
+                    for f in sorted(files):
+                        if os.path.splitext(f)[1] in _WATCH_EXTENSIONS:
                             fp = os.path.join(root, f)
-                            result[fp] = os.path.getmtime(fp)
-        return result
+                            entry = f"{fp}:{os.path.getmtime(fp)}"
+                            if f.endswith('.css'):
+                                css_mtimes.append(entry)
+                            else:
+                                other_mtimes.append(entry)
+        css_hash = hashlib.md5('|'.join(css_mtimes).encode()).hexdigest()[:8]
+        other_hash = hashlib.md5('|'.join(other_mtimes).encode()).hexdigest()[:8]
+        return css_hash, other_hash
 
-    async def _file_watcher():
-        global _watched_mtimes
-        _watched_mtimes = _collect_files()
-        while True:
-            await asyncio.sleep(5)
-            current = _collect_files()
-            changed = [f for f in current if current[f] != _watched_mtimes.get(f)]
-            changed += [f for f in _watched_mtimes if f not in current]
-            if changed:
-                _watched_mtimes = current
-                css_only = all(f.endswith('.css') for f in changed)
-                change_type = 'css' if css_only else 'reload'
-                logger.info(f'File changes detected ({change_type}): {[os.path.basename(f) for f in changed]}')
-                await manager.broadcast_all('files_changed', {'type': change_type})
-
-    @app.on_event('startup')
-    async def start_file_watcher():
-        asyncio.create_task(_file_watcher())
+    @app.get('/api/files-hash')
+    async def api_files_hash():
+        css_hash, other_hash = _compute_files_hash()
+        return {'css': css_hash, 'other': other_hash}
 
 # ============== DB Helpers ==============
 
@@ -593,6 +585,10 @@ async def api_create_task(request: Request, user_id: int = Depends(get_authentic
                 except Exception:
                     logger.error('Failed to sync new task to Google Calendar', exc_info=True)
 
+        # Log activity
+        conn.execute('''INSERT INTO activity_log (user_id, activity_type, task_text, xp_earned)
+                        VALUES (?, 'task_created', ?, ?)''', (user_id, data['text'].strip(), 3))
+
         conn.commit()
 
     await send_user_event(user_id, 'task_created', {
@@ -726,12 +722,11 @@ async def api_complete_task(task_id: str, request: Request, user_id: int = Depen
                         current_streak=?, combo=?, last_completion_date=? WHERE user_id=?''',
                      (new_level, new_xp, new_xp_max, new_completed, new_streak, combo, today, user_id))
 
-        # Log activity for friends feed ONLY if task has media
+        # Log activity
         media = conn.execute('SELECT media_type, filename FROM task_media WHERE task_id = ?', (task_id,)).fetchone()
-        if media:
-            extra_data = json.dumps({'media_type': media['media_type'], 'media_url': f"/UPLOADS/{media['filename']}"})
-            conn.execute('''INSERT INTO activity_log (user_id, activity_type, task_text, xp_earned, extra_data)
-                            VALUES (?, 'task_completed', ?, ?, ?)''', (user_id, task['text'], xp_earned, extra_data))
+        extra_data = json.dumps({'media_type': media['media_type'], 'media_url': f"/UPLOADS/{media['filename']}"}) if media else None
+        conn.execute('''INSERT INTO activity_log (user_id, activity_type, task_text, xp_earned, extra_data)
+                        VALUES (?, 'task_completed', ?, ?, ?)''', (user_id, task['text'], xp_earned, extra_data))
 
         # Delete Google Calendar event on completion
         if GOOGLE_CALENDAR_ENABLED and task['google_event_id']:
@@ -760,6 +755,19 @@ async def api_complete_task(task_id: str, request: Request, user_id: int = Depen
         'completed': new_completed, 'streak': new_streak, 'combo': combo,
         'leveledUp': leveled_up, 'newAchievements': new_achievements
     })
+
+@app.get('/api/history')
+async def api_history(user_id: int = Depends(get_authenticated_user), limit: int = 100, offset: int = 0):
+    with get_db() as conn:
+        rows = conn.execute('''SELECT activity_type, task_text, xp_earned, created_at
+                               FROM activity_log WHERE user_id = ?
+                               ORDER BY created_at DESC LIMIT ? OFFSET ?''',
+                            (user_id, limit, offset)).fetchall()
+        return JSONResponse({'history': [
+            {'type': r['activity_type'], 'text': r['task_text'],
+             'points': r['xp_earned'], 'timestamp': r['created_at']}
+            for r in rows
+        ]})
 
 @app.post('/api/combo/reset')
 async def api_reset_combo(user_id: int = Depends(get_authenticated_user)):
@@ -1506,6 +1514,10 @@ init_db()
 
 # Template globals
 templates.env.globals['app_version'] = get_version()
+templates.env.globals['drum_row_height'] = DRUM_ROW_HEIGHT
+templates.env.globals['drum_max_top_angle'] = DRUM_MAX_TOP_ANGLE
+templates.env.globals['drum_perspective_k'] = DRUM_PERSPECTIVE_K
+templates.env.globals['drum_highlight_offset'] = DRUM_HIGHLIGHT_OFFSET
 
 # Static files (must be after all routes)
 app.mount('/static', StaticFiles(directory='FRONTEND'), name='static')

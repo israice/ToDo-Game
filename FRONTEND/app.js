@@ -5,7 +5,7 @@ const esc = t => t.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '
 
 // ========== CONSTANTS ==========
 const COMBO_TIMEOUT_MS = 5000;
-const TASK_COMPLETE_ANIMATION_MS = 600;
+const TASK_COMPLETE_ANIMATION_MS = 300;
 const TASK_DELETE_ANIMATION_MS = 300;
 const ACHIEVEMENT_POPUP_MS = 3500;
 const LEVELUP_POPUP_MS = 2500;
@@ -14,7 +14,7 @@ const DEBOUNCE_DELAY_MS = 300;
 // ========== STATE ==========
 let state = {
   tasks: [], level: 1, xp: 0, xpMax: 100, combo: 0, completed: 0,
-  achievements: {}, streak: 0, sound: false, history: []
+  achievements: {}, streak: 0, sound: false
 };
 let comboTimer = null;
 let audioCtx = null;
@@ -36,8 +36,12 @@ let videoObserver = null;
 let isMobileDevice = false;
 const MOBILE_BREAKPOINT = 768;
 
+// Tab animation lock
+let _tabAnimating = false;
+
 // Drag-scroll offset for tasks carousel
 let scrollOffset = 0;
+let drumFraction = 0; // fractional offset for smooth 3D rotation (-0.5 to 0.5)
 
 // ========== UTILITIES ==========
 function debounce(fn, delay) {
@@ -46,6 +50,59 @@ function debounce(fn, delay) {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), delay);
   };
+}
+
+function getSortedTasks() {
+  return [...state.tasks].sort((a, b) => {
+    const sa = a.scheduled_start || '';
+    const sb = b.scheduled_start || '';
+    if (sa && sb) return sa.localeCompare(sb);
+    if (sa) return -1;
+    if (sb) return 1;
+    return 0;
+  });
+}
+
+function getDrumBounds(highlightIdx) {
+  const min = -highlightIdx;
+  const max = Math.max(0, state.tasks.length - highlightIdx - 1);
+  return { min, max };
+}
+
+function getTimePeriodInfo(hour) {
+  if (hour < 0) return { cls: '', icon: '' };
+  if (hour < 6) return { cls: 'time-night', icon: '\uD83C\uDF19' };
+  if (hour < 12) return { cls: 'time-morning', icon: '\uD83C\uDF05' };
+  if (hour < 18) return { cls: 'time-day', icon: '\u2600\uFE0F' };
+  return { cls: 'time-evening', icon: '\uD83C\uDF07' };
+}
+
+function createDateSpan(dateData, extraClass = '') {
+  const span = document.createElement('span');
+  span.className = ('task-date ' + extraClass).trim();
+  const dayEl = document.createElement('span');
+  dayEl.className = 'task-date-day';
+  dayEl.textContent = dateData.day;
+  const timeEl = document.createElement('span');
+  timeEl.className = 'task-date-time';
+  timeEl.textContent = dateData.time;
+  span.appendChild(dayEl);
+  span.appendChild(timeEl);
+  return span;
+}
+
+function processNewAchievements(achIds, leveledUp) {
+  achIds.forEach(achId => {
+    state.achievements[achId] = true;
+    const ach = ACHIEVEMENTS.find(a => a.id === achId);
+    // achievements logged server-side via activity_log
+  });
+  if (achIds.length) renderAchievements();
+  if (leveledUp) {
+    showPopup('levelup', achIds);
+  } else {
+    achIds.forEach((achId, i) => setTimeout(() => showPopup('achievement', achId), i * 500));
+  }
 }
 
 // ========== DEVICE DETECTION ==========
@@ -253,35 +310,12 @@ function handleWebSocketEvent(event, data) {
       state.streak = data.streak;
       state.combo = data.combo;
       const wsAch = data.newAchievements || [];
-      wsAch.forEach(achId => {
-        state.achievements[achId] = true;
-        const ach = ACHIEVEMENTS.find(a => a.id === achId);
-        if (ach) addToHistory(ach.name, 100, ach.icon);
-      });
-      if (wsAch.length) renderAchievements();
-      if (data.leveledUp) {
-        showPopup('levelup', wsAch);
-      } else {
-        wsAch.forEach((achId, i) => setTimeout(() => showPopup('achievement', achId), i * 500));
-      }
+      processNewAchievements(wsAch, data.leveledUp);
       if (state.combo > 1) playSound('combo');
       renderTasks();
       updateUI();
       break;
     }
-
-    case 'files_changed':
-      console.log('🔄 Files changed:', data.type);
-      if (data.type === 'css') {
-        document.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
-          const url = new URL(link.href);
-          url.searchParams.set('_r', Date.now());
-          link.href = url.toString();
-        });
-      } else {
-        window.location.reload(true);
-      }
-      break;
 
     case 'server_shutdown':
       console.log('🔄 Server shutting down:', data.message);
@@ -309,7 +343,27 @@ function playSound(type) {
     combo: () => { const f = 600 + state.combo * 50; play([f, f + 200], 0.15, 0.2, 'square'); },
     levelup: () => [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => play([f, f], 0.2), i * 150)),
     achievement: () => play([800, 1600], 0.5, 0.25, 'triangle'),
-    delete: () => play([300, 100], 0.15, 0.2)
+    delete: () => play([300, 100], 0.15, 0.2),
+    tick: () => {
+      // Revolver cylinder click — sharp metallic click
+      const len = Math.floor(audioCtx.sampleRate * 0.06);
+      const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) {
+        const t = i / audioCtx.sampleRate;
+        // Initial sharp transient + metallic ring
+        d[i] = ((Math.random() * 2 - 1) * Math.exp(-t * 150) +
+                 Math.sin(t * 3500) * Math.exp(-t * 80) * 0.6) * 0.7;
+      }
+      const n = audioCtx.createBufferSource();
+      n.buffer = buf;
+      const bp = audioCtx.createBiquadFilter();
+      bp.type = 'bandpass'; bp.frequency.value = 3000; bp.Q.value = 2;
+      const g = audioCtx.createGain();
+      g.gain.value = 0.6;
+      n.connect(bp); bp.connect(g); g.connect(audioCtx.destination);
+      n.start(now);
+    }
   };
   cfg[type]?.();
 }
@@ -336,7 +390,7 @@ function updateUI() {
   const lvlTop = $('level-top'); if (lvlTop) lvlTop.textContent = state.level;
   const xpFill = $('xp-fill'); if (xpFill) xpFill.style.width = (state.xp / state.xpMax * 100) + '%';
   $('combo-container').classList.toggle('active', state.combo > 0);
-  if (state.combo > 0) $('combo').textContent = state.combo;
+  $('combo').textContent = state.combo;
   $('sound-icon').innerHTML = state.sound ? '&#128266;' : '&#128263;';
   const ss = $('sound-status'); if (ss) ss.textContent = state.sound ? 'ON' : 'OFF';
 }
@@ -357,65 +411,144 @@ function getHourFromISO(iso) {
   return isNaN(d.getTime()) ? -1 : d.getHours();
 }
 
-// ========== RENDER TASKS ==========
+// ========== RENDER TASKS (3D Drum Roller) ==========
+const ROW_HEIGHT_SETTING = window.DRUM_ROW_HEIGHT || 20;
+const MAX_TOP_ANGLE = window.DRUM_MAX_TOP_ANGLE || 85;
+const PERSP_K = window.DRUM_PERSPECTIVE_K || 2;
+
+const HIGHLIGHT_OFFSET = window.DRUM_HIGHLIGHT_OFFSET ?? 2;
+
+function getDrumParams() {
+  const list = $('tasks-list');
+  const h = list ? list.clientHeight : 700;
+  if (h < 50) return { totalRows: 11, centerIdx: 5, highlightIdx: 5, radius: 220, angleStep: 11 };
+
+  // How many rows fit the screen height
+  const isLarge = window.innerWidth >= MOBILE_BREAKPOINT;
+  const rowHeight = isLarge ? ROW_HEIGHT_SETTING : Math.max(20, Math.round(ROW_HEIGHT_SETTING * 0.85));
+  const raw = Math.max(7, Math.floor(h / rowHeight));
+  const totalRows = raw % 2 === 1 ? raw : raw - 1; // ensure odd
+  const centerIdx = (totalRows - 1) / 2;
+
+  // On large screens, highlight row is above center
+  const highlightIdx = isLarge ? Math.max(0, Math.min(totalRows - 1, centerIdx - HIGHLIGHT_OFFSET)) : centerIdx;
+
+  // Angle per row: spread rows evenly across ±MAX_TOP_ANGLE
+  const angleStep = MAX_TOP_ANGLE / centerIdx;
+  const topAngleRad = MAX_TOP_ANGLE * Math.PI / 180;
+
+  // Radius with perspective compensation so projected top row hits screen edge
+  const sinA = Math.sin(topAngleRad);
+  const cosA = Math.cos(topAngleRad);
+  const radius = sinA > 0 ? (h / 2) * (PERSP_K + 1 - cosA) / (PERSP_K * sinA) : 220;
+
+  return { totalRows, centerIdx, highlightIdx, radius, angleStep };
+}
+
 function renderTasks() {
+  if (_tabAnimating) return;   // drum reads clientHeight — wrong during transform
+
+  if (_drumNeedsReset) {
+    _drumNeedsReset = false;
+    cancelAnimationFrame(_drumSnapRaf);
+    _drumScrollTarget = null;
+    const idx = findCurrentTaskIndex();
+    const { highlightIdx } = getDrumParams();
+    scrollOffset = idx - highlightIdx;
+    drumFraction = 0;
+  }
+
   const list = $('tasks-list');
   list.textContent = '';
   const empty = state.tasks.length === 0;
   $('empty-state').classList.toggle('show', empty);
 
-  const sorted = [...state.tasks].sort((a, b) => {
-    const sa = a.scheduled_start || '';
-    const sb = b.scheduled_start || '';
-    if (sa && sb) return sa.localeCompare(sb);
-    if (sa) return -1;
-    if (sb) return 1;
-    return 0;
-  });
+  const sorted = getSortedTasks();
 
-  // Clamp scrollOffset to valid range
-  const minOffset = -5;
-  const maxOffset = Math.max(0, sorted.length - 6);
-  scrollOffset = Math.max(minOffset, Math.min(maxOffset, scrollOffset));
+  const { totalRows, centerIdx, highlightIdx, radius, angleStep } = getDrumParams();
 
-  for (let idx = 0; idx < 11; idx++) {
+  // Clamp scrollOffset (skip during active scroll animation to avoid blocking it)
+  const { min: minOffset, max: maxOffset } = getDrumBounds(highlightIdx);
+  if (_drumScrollTarget === null) {
+    scrollOffset = Math.max(minOffset, Math.min(maxOffset, scrollOffset));
+  }
+
+  // Set perspective proportional to radius for consistent visual depth
+  list.style.perspective = Math.round(radius * PERSP_K) + 'px';
+  // Wrapper pushed back by -radius so center item (translateZ=+radius) ends at Z=0
+  const wrapper = document.createElement('div');
+  wrapper.className = 'drum-wrapper';
+  wrapper.style.transform = 'translateZ(' + (-radius) + 'px)';
+  list.appendChild(wrapper);
+
+  const highlightTaskIdx = scrollOffset + highlightIdx;
+
+  // Measure actual highlight card height to compute symmetric expand
+  let expandExtra = 0;
+  let centerH = 38; // default card height
+  if (highlightTaskIdx >= 0 && highlightTaskIdx < sorted.length) {
+    const ct = sorted[highlightTaskIdx];
+    const probe = document.createElement('li');
+    probe.className = 'task-item center';
+    probe.style.cssText = 'position:absolute;left:8px;right:8px;visibility:hidden;pointer-events:none;';
+    const pText = document.createElement('span');
+    pText.className = 'task-text';
+    pText.textContent = ct.text;
+    const pMedia = document.createElement('span'); pMedia.className = 'task-media'; pMedia.textContent = '\uD83D\uDDBC\uFE0F';
+    const pCheck = document.createElement('label'); pCheck.className = 'task-checkbox';
+    const pIcon = document.createElement('span'); pIcon.className = 'task-time-icon';
+    const pDate1 = document.createElement('span'); pDate1.className = 'task-date';
+    const pDate2 = document.createElement('span'); pDate2.className = 'task-date';
+    const pDel = document.createElement('button'); pDel.className = 'task-delete';
+    probe.append(pMedia, pCheck, pIcon, pText, pDate1, pDate2, pDel);
+    list.appendChild(probe);
+    centerH = probe.offsetHeight;
+    list.removeChild(probe);
+    if (centerH > 38) {
+      // Projected pixel gap between adjacent cards on drum
+      const projGap = radius * Math.sin(angleStep * Math.PI / 180);
+      // Overlap: center half-height vs neighbor top edge (neighbor center at projGap, top at projGap - 19)
+      const overlap = centerH / 2 - (projGap - 19) + 4;
+      if (overlap > 0) {
+        expandExtra = (overlap / Math.max(1, projGap)) * angleStep;
+      }
+    }
+  }
+
+  for (let idx = 0; idx < totalRows; idx++) {
     const taskIdx = scrollOffset + idx;
-    const dist = Math.abs(idx - 5);
-    const widthPct = [100, 99, 97, 95, 92, 90][dist];
-    const height = [40, 37, 33, 28, 24, 20][dist];
-    const fontSize = [0.85, 0.82, 0.78, 0.73, 0.68, 0.63][dist];
+    let angle = (idx - centerIdx - drumFraction) * angleStep;
+    // Push non-highlight cards away symmetrically if highlight card is tall
+    if (idx !== highlightIdx && expandExtra > 0) {
+      angle += Math.sign(idx - highlightIdx) * expandExtra;
+    }
+    const absAngle = Math.abs(angle);
+    const opacity = Math.max(0.15, 1 - absAngle / 120);
 
     // Placeholder if out of bounds
     if (taskIdx < 0 || taskIdx >= sorted.length) {
       const li = document.createElement('li');
       li.className = 'task-item placeholder';
-      li.style.width = widthPct + '%';
-      li.style.height = height + 'px';
-      li.style.minHeight = height + 'px';
-      li.style.maxHeight = height + 'px';
-      li.style.overflow = 'hidden';
-      li.style.fontSize = fontSize + 'rem';
-      li.style.padding = Math.max(2, 6 - dist * 2) + 'px';
-      li.style.margin = '0 auto';
-      if (idx === 5) li.style.borderColor = 'var(--accent-fire)';
-      list.appendChild(li);
+      li.style.transform = 'rotateX(' + angle + 'deg) translateZ(' + radius + 'px)';
+      li.style.opacity = opacity;
+      li.dataset.drumIdx = idx;
+
+      wrapper.appendChild(li);
       continue;
     }
 
     const task = sorted[taskIdx];
     const li = document.createElement('li');
     const hour = getHourFromISO(task.scheduled_start);
-    const timePeriod = hour < 0 ? '' : hour < 6 ? 'time-night' : hour < 12 ? 'time-morning' : hour < 18 ? 'time-day' : 'time-evening';
-    li.className = 'task-item' + (timePeriod ? ' ' + timePeriod : '');
-    li.style.width = widthPct + '%';
-    li.style.height = height + 'px';
-    li.style.minHeight = height + 'px';
-    li.style.maxHeight = height + 'px';
-    li.style.overflow = 'hidden';
-    li.style.fontSize = fontSize + 'rem';
-    li.style.padding = Math.max(2, 6 - dist * 2) + 'px';
-    li.style.margin = '0 auto';
-    if (idx === 5) li.style.borderColor = 'var(--accent-fire)';
+    const { cls: timePeriod, icon: timeIconText } = getTimePeriodInfo(hour);
+    const isHighlight = idx === highlightIdx;
+    li.className = 'task-item' + (timePeriod ? ' ' + timePeriod : '') + (isHighlight ? ' center' : '');
+    li.style.transform = 'rotateX(' + angle + 'deg) translateZ(' + radius + 'px)';
+    li.style.opacity = opacity;
+    // Center tall card symmetrically on drum axis
+    if (isHighlight && centerH > 38) {
+      li.style.top = 'calc(50% - ' + (centerH / 2) + 'px)';
+    }
     li.dataset.id = task.id;
 
     const start = formatTaskDate(task.scheduled_start);
@@ -448,35 +581,21 @@ function renderTasks() {
     textSpan.className = 'task-text';
     textSpan.textContent = task.text;
 
-    const startDateSpan = document.createElement('span');
-    startDateSpan.className = 'task-date';
-    const startDay = document.createElement('span');
-    startDay.className = 'task-date-day';
-    startDay.textContent = start.day;
-    const startTime = document.createElement('span');
-    startTime.className = 'task-date-time';
-    startTime.textContent = start.time;
-    startDateSpan.appendChild(startDay);
-    startDateSpan.appendChild(startTime);
-
-    const endDateSpan = document.createElement('span');
-    endDateSpan.className = 'task-date task-deadline';
-    const endDay = document.createElement('span');
-    endDay.className = 'task-date-day';
-    endDay.textContent = end.day;
-    const endTime = document.createElement('span');
-    endTime.className = 'task-date-time';
-    endTime.textContent = end.time;
-    endDateSpan.appendChild(endDay);
-    endDateSpan.appendChild(endTime);
+    const startDateSpan = createDateSpan(start);
+    const endDateSpan = createDateSpan(end, 'task-deadline');
 
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'task-delete';
     deleteBtn.setAttribute('aria-label', 'Delete quest');
     deleteBtn.textContent = '\uD83D\uDDD1';
 
+    const timeIcon = document.createElement('span');
+    timeIcon.className = 'task-time-icon';
+    timeIcon.textContent = timeIconText;
+
     li.appendChild(mediaSpan);
     li.appendChild(checkLabel);
+    li.appendChild(timeIcon);
     li.appendChild(textSpan);
     li.appendChild(startDateSpan);
     li.appendChild(endDateSpan);
@@ -486,86 +605,361 @@ function renderTasks() {
     deleteBtn.onclick = () => deleteTask(task.id, li);
     mediaSpan.onclick = () => openMediaPopup(task.id);
 
+    li.dataset.drumIdx = idx;
+
     let original = task.text;
     const debouncedEdit = debounce((id, text) => editTask(id, text), DEBOUNCE_DELAY_MS);
-    textSpan.onclick = e => { e.stopPropagation(); original = task.text; textSpan.contentEditable = 'true'; textSpan.focus(); document.getSelection().selectAllChildren(textSpan); };
-    textSpan.onblur = () => { textSpan.contentEditable = 'false'; debouncedEdit(task.id, textSpan.textContent); };
-    textSpan.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); textSpan.blur(); } else if (e.key === 'Escape') { textSpan.textContent = original; textSpan.contentEditable = 'false'; } };
+    // Long press to edit — stored on the element for access from drag handler
+    textSpan._enterEdit = () => {
+      original = task.text;
+      list.classList.add('editing');
+      textSpan.setAttribute('contenteditable', 'true');
+      const hl = document.createElement('span');
+      hl.className = 'edit-highlight';
+      hl.innerText = textSpan.innerText;
+      textSpan.innerText = '';
+      textSpan.appendChild(hl);
+      textSpan.focus();
+      document.getSelection().selectAllChildren(hl);
+    };
+    let editing = false;
+    const exitEdit = (save) => {
+      if (!editing) return;
+      editing = false;
+      const text = textSpan.innerText.trim();
+      // Remove highlight wrapper
+      textSpan.innerText = text || original;
+      textSpan.removeAttribute('contenteditable');
+      list.classList.remove('editing');
+      if (save && text && text !== original) debouncedEdit(task.id, text);
+    };
+    const origEnterEdit = textSpan._enterEdit;
+    textSpan._enterEdit = () => { editing = true; origEnterEdit(); };
+    textSpan.onblur = () => exitEdit(true);
+    textSpan.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); textSpan.blur(); } else if (e.key === 'Escape') { exitEdit(false); } };
 
-    list.appendChild(li);
+    wrapper.appendChild(li);
   }
+
+
   const taskCount = $('task-count');
   if (taskCount) taskCount.textContent = `(${state.tasks.length})`;
 }
 
 // ========== DRAG-SCROLL FOR TASKS CAROUSEL ==========
+let _drumSnapRaf = 0;
+let _drumScrollTarget = null;
+let _drumNeedsReset = false;
+
+// Find the sorted index of the current/next task (closest to now)
+function findCurrentTaskIndex() {
+  const sorted = getSortedTasks();
+  const now = new Date().toISOString();
+  // Find the last task that already started (scheduled_start <= now)
+  let lastStarted = -1;
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    if (sorted[i].scheduled_start && sorted[i].scheduled_start <= now) {
+      lastStarted = i;
+      break;
+    }
+  }
+  if (lastStarted >= 0) return lastStarted;
+  // No started task — find first upcoming
+  for (let i = 0; i < sorted.length; i++) {
+    if (sorted[i].scheduled_start && sorted[i].scheduled_start >= now) return i;
+  }
+  // All tasks have no date — show first
+  return 0;
+}
+
+function scrollToCurrentTask(instant) {
+  const idx = findCurrentTaskIndex();
+  const { highlightIdx } = getDrumParams();
+  if (instant) {
+    // Jump directly without animation
+    cancelAnimationFrame(_drumSnapRaf);
+    _drumScrollTarget = null;
+    scrollOffset = idx - highlightIdx;
+    drumFraction = 0;
+    renderTasks();
+  } else {
+    scrollToTarget(idx - highlightIdx);
+  }
+}
+
+function scrollToNewTask(id) {
+  const sorted = getSortedTasks();
+  const idx = sorted.findIndex(t => t.id === id);
+  if (idx >= 0) {
+    const { highlightIdx } = getDrumParams();
+    scrollToTarget(idx - highlightIdx);
+    resetIdleTimer();
+  }
+}
+
+function scrollToTarget(target) {
+  cancelAnimationFrame(_drumSnapRaf);
+  const { highlightIdx } = getDrumParams();
+  const { min, max } = getDrumBounds(highlightIdx);
+  _drumScrollTarget = Math.max(min, Math.min(max, target));
+  if (_drumSnapAnimate) _drumSnapRaf = requestAnimationFrame(_drumSnapAnimate);
+}
+
+let _drumSnapAnimate; // assigned inside initTaskDrag
+
 function initTaskDrag() {
   const list = $('tasks-list');
   if (!list) return;
 
   const ROW_PX = 30; // pixels of drag per 1 row shift
   let startY = 0;
-  let startOffset = 0;
+  let startRawOffset = 0;
   let isDragging = false;
+  let tapTarget = null;
+  let _prevTickOffset = scrollOffset;
+
+  function drumTick() {
+    // Don't tick if at boundary (clamped — no real movement)
+    const { highlightIdx } = getDrumParams();
+    const { min, max } = getDrumBounds(highlightIdx);
+    const clamped = Math.max(min, Math.min(max, scrollOffset));
+    if (clamped !== _prevTickOffset) { playSound('tick'); _prevTickOffset = clamped; }
+  }
+
+  function clampDrum() {
+    const { highlightIdx } = getDrumParams();
+    const { min, max } = getDrumBounds(highlightIdx);
+    const raw = scrollOffset + drumFraction;
+    if (raw < min) { scrollOffset = min; drumFraction = 0; }
+    else if (raw > max) { scrollOffset = max; drumFraction = 0; }
+  }
 
   function onPointerMove(e) {
     if (!isDragging) return;
+    // Cancel long press if user starts dragging
+    if (_listLongPressTimer && Math.abs(e.clientY - startY) > 5) {
+      clearTimeout(_listLongPressTimer);
+      _listLongPressTimer = null;
+    }
     const deltaY = e.clientY - startY;
+    const rawOffset = startRawOffset + deltaY / ROW_PX;
+    scrollOffset = Math.round(rawOffset);
+    drumFraction = rawOffset - scrollOffset;
+    clampDrum();
+    drumTick();
+    renderTasks();
+  }
 
-    // Continuous offset: integer part = which tasks to show, fraction = smooth translate
-    const rawOffset = startOffset - deltaY / ROW_PX;
-    const newOffset = Math.round(rawOffset);
-    const fractionPx = (rawOffset - newOffset) * ROW_PX;
-
-    if (newOffset !== scrollOffset) {
-      scrollOffset = newOffset;
+  function snapAnimate() {
+    // Multi-step scroll toward target (click-to-scroll)
+    if (_drumScrollTarget !== null) {
+      const diff = _drumScrollTarget - (scrollOffset + drumFraction);
+      if (Math.abs(diff) < 0.005) {
+        scrollOffset = _drumScrollTarget;
+        drumFraction = 0;
+        _drumScrollTarget = null;
+        drumTick();
+        renderTasks();
+        list.classList.remove('dragging');
+        return;
+      }
+      const step = diff * 0.18;
+      const raw = scrollOffset + drumFraction + step;
+      scrollOffset = Math.round(raw);
+      drumFraction = raw - scrollOffset;
+      drumTick();
       renderTasks();
+      _drumSnapRaf = requestAnimationFrame(snapAnimate);
+      return;
     }
 
-    // Smooth sub-row translate
-    list.style.transform = 'translateY(' + (-fractionPx) + 'px)';
+    // Simple fraction snap (after drag/wheel)
+    if (Math.abs(drumFraction) < 0.005) {
+      drumFraction = 0;
+      drumTick();
+      renderTasks();
+      list.classList.remove('dragging');
+      return;
+    }
+    drumFraction *= 0.82; // exponential ease-out
+    renderTasks();
+    _drumSnapRaf = requestAnimationFrame(snapAnimate);
   }
+  _drumSnapAnimate = snapAnimate;
 
-  function onPointerUp() {
+  function onPointerUp(e) {
     if (!isDragging) return;
     isDragging = false;
-
-    // Snap back with smooth animation
-    list.style.transition = 'transform 0.2s ease-out';
-    list.style.transform = 'translateY(0)';
-    let cleaned = false;
-    const cleanup = () => {
-      if (cleaned) return;
-      cleaned = true;
-      // Freeze animation:none inline BEFORE removing .dragging
-      // so slide-in doesn't re-trigger when CSS rule stops applying
-      list.querySelectorAll('.task-item').forEach(el => { el.style.animation = 'none'; });
-      list.classList.remove('dragging');
-      list.style.transition = '';
-      list.style.transform = '';
-      list.removeEventListener('transitionend', cleanup);
-    };
-    list.addEventListener('transitionend', cleanup);
-    // Fallback in case transitionend doesn't fire
-    setTimeout(cleanup, 250);
-
+    clearTimeout(_listLongPressTimer);
     document.removeEventListener('pointermove', onPointerMove);
     document.removeEventListener('pointerup', onPointerUp);
+
+    // If long press already triggered edit, skip tap logic
+    if (_listDidLongPress) {
+      _listDidLongPress = false;
+      tapTarget = null;
+      list.classList.remove('dragging');
+      return;
+    }
+
+    // Detect tap (no significant drag)
+    const totalDrag = Math.abs(e.clientY - startY);
+    if (totalDrag < 5 && tapTarget) {
+      const idx = Number(tapTarget.dataset.drumIdx);
+      const { highlightIdx } = getDrumParams();
+      if (!isNaN(idx) && idx !== highlightIdx) {
+        // Scroll non-highlight row to red border
+        scrollToTarget(scrollOffset + (idx - highlightIdx));
+        tapTarget = null;
+        list.classList.remove('dragging');
+        return;
+      }
+      if (!isNaN(idx) && idx === highlightIdx) {
+        // Tap on highlight row — only trigger specific elements
+        tapTarget = null;
+        list.classList.remove('dragging');
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        if (el) {
+          // Only text editing if clicked directly on text node content
+          const textEl = el.closest('.task-text');
+          if (textEl && el === textEl && textEl.textContent.trim()) {
+            // Check if click X is within the actual text width
+            const range = document.createRange();
+            range.selectNodeContents(textEl);
+            const textRect = range.getBoundingClientRect();
+            if (e.clientX <= textRect.right) {
+              textEl.click();
+              return;
+            }
+          }
+          // Other interactive elements
+          const btn = el.closest('button');
+          if (btn) { btn.click(); return; }
+          const label = el.closest('label');
+          if (label) { label.click(); return; }
+          const media = el.closest('.task-media');
+          if (media) { media.click(); return; }
+        }
+        return;
+      }
+    }
+    tapTarget = null;
+
+    // Smooth snap via rAF — no CSS transitions, no flicker
+    _drumSnapRaf = requestAnimationFrame(snapAnimate);
   }
+
+  let _listLongPressTimer = null;
+  let _listDidLongPress = false;
+
+  // Prevent native context menu during long press on task text
+  list.addEventListener('contextmenu', e => {
+    if (e.target.closest('.task-text') && !e.target.closest('[contenteditable="true"]')) {
+      e.preventDefault();
+    }
+  });
 
   list.addEventListener('pointerdown', e => {
     // Skip drag when interacting with buttons, inputs, or editable text
     if (e.target.closest('button, input, label, [contenteditable="true"]')) return;
+    tapTarget = e.target.closest('.task-item');
+    _listDidLongPress = false;
+    clearTimeout(_listLongPressTimer);
+
+    // Start long press timer for text editing
+    const textEl = e.target.closest('.task-text');
+    if (textEl && tapTarget && !textEl.hasAttribute('contenteditable')) {
+      _listLongPressTimer = setTimeout(() => {
+        _listDidLongPress = true;
+        const idx = Number(tapTarget.dataset.drumIdx);
+        const { highlightIdx } = getDrumParams();
+        if (!isNaN(idx) && idx === highlightIdx && textEl._enterEdit) {
+          textEl._enterEdit();
+        }
+      }, 500);
+    }
+
+    cancelAnimationFrame(_drumSnapRaf);
+    _drumScrollTarget = null;
     isDragging = true;
     startY = e.clientY;
-    startOffset = scrollOffset;
-    list.style.transition = '';
-    list.style.transform = '';
+    // Include leftover fraction so re-grab mid-snap feels continuous
+    startRawOffset = scrollOffset + drumFraction;
     list.classList.add('dragging');
     list.setPointerCapture(e.pointerId);
     document.addEventListener('pointermove', onPointerMove);
     document.addEventListener('pointerup', onPointerUp);
   });
+
+  // Keyboard arrows
+  let _keyRepeatTimer = null;
+  let _keyRepeatInterval = null;
+
+  function drumArrowStep(direction, instant) {
+    cancelAnimationFrame(_drumSnapRaf);
+    _drumScrollTarget = null;
+    const { highlightIdx } = getDrumParams();
+    const { min, max } = getDrumBounds(highlightIdx);
+    const next = scrollOffset + direction;
+    if (next < min || next > max) return;
+    scrollOffset = next;
+    drumTick();
+    if (instant) {
+      drumFraction = 0;
+      renderTasks();
+    } else {
+      drumFraction = -direction * 0.4;
+      _drumSnapRaf = requestAnimationFrame(snapAnimate);
+    }
+  }
+
+  function stopKeyRepeat() {
+    clearTimeout(_keyRepeatTimer);
+    clearInterval(_keyRepeatInterval);
+    _keyRepeatTimer = null;
+    _keyRepeatInterval = null;
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.target.closest('input, textarea, [contenteditable="true"]')) return;
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    if (e.repeat) return; // ignore native repeat, we handle our own
+    const dir = e.key === 'ArrowUp' ? 1 : -1;
+    drumArrowStep(dir);
+    resetIdleTimer();
+    stopKeyRepeat();
+    _keyRepeatTimer = setTimeout(() => {
+      _keyRepeatInterval = setInterval(() => {
+        drumArrowStep(dir, true);
+        resetIdleTimer();
+      }, 300);
+    }, 500); // initial delay before repeat starts
+  });
+
+  document.addEventListener('keyup', e => {
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      stopKeyRepeat();
+    }
+  });
+
+  // Mouse wheel / trackpad scroll
+  list.addEventListener('wheel', e => {
+    // During editing, let scroll happen inside the text
+    if (e.target.closest('[contenteditable="true"]')) return;
+    e.preventDefault();
+    cancelAnimationFrame(_drumSnapRaf);
+    _drumScrollTarget = null;
+    const { highlightIdx } = getDrumParams();
+    const { min, max } = getDrumBounds(highlightIdx);
+    const delta = e.deltaY > 0 ? -1 : 1;
+    const next = scrollOffset + delta;
+    if (next < min || next > max) return; // at boundary — stop
+    scrollOffset = next;
+    drumTick();
+    drumFraction = -delta * 0.4; // start with visual offset for smooth feel
+    _drumSnapRaf = requestAnimationFrame(snapAnimate);
+  }, { passive: false });
 }
 
 // ========== RENDER ACHIEVEMENTS ==========
@@ -605,7 +999,7 @@ function showPopup(type, data) {
   } else {
     const a = ACHIEVEMENTS.find(x => x.id === data);
     if (!a) return;
-    $('popup-icon').textContent = a.icon; $('popup-name').textContent = a.name; $('popup-desc').textContent = a.desc;
+    $('popup-icon').innerHTML = a.icon; $('popup-name').textContent = a.name; $('popup-desc').textContent = a.desc;
   }
   popup.classList.add('show');
   playSound(isAch ? 'achievement' : 'levelup');
@@ -639,8 +1033,9 @@ async function addTask(text) {
     // Mark as pending to avoid duplicate from WebSocket
     pendingTasks.add(result.id);
 
-    // Skip if WebSocket already added this task (race condition)
+    // If WebSocket already added this task — just scroll to it
     if (state.tasks.find(t => t.id === result.id)) {
+      scrollToNewTask(result.id);
       setTimeout(() => pendingTasks.delete(result.id), 3000);
       return;
     }
@@ -655,11 +1050,11 @@ async function addTask(text) {
       state.level = result.level;
       state.xp = result.currentXp;
       state.xpMax = result.xpMax;
-      addToHistory('Task created', result.xpEarned);
       if (result.leveledUp) showPopup('levelup');
     }
 
     renderTasks();
+    scrollToNewTask(result.id);
     updateUI();
     playSound('add');
 
@@ -685,55 +1080,54 @@ async function completeTask(id, el) {
   clearTimeout(comboTimer);
 
   pendingCompletes.add(id);
+
+  // Optimistic: remove task from UI after animation
+  const taskIdx = state.tasks.findIndex(t => t.id === id);
+  const savedTask = taskIdx >= 0 ? state.tasks[taskIdx] : null;
+
+  setTimeout(() => {
+    state.tasks = state.tasks.filter(t => t.id !== id);
+    renderTasks();
+    updateUI();
+  }, TASK_COMPLETE_ANIMATION_MS);
+
+  // Send request in parallel
   const result = await api(`/api/tasks/${id}/complete`, {
     method: 'POST',
     body: JSON.stringify({ combo: state.combo })
   });
 
-  setTimeout(() => {
-    if (result && result.success) {
-      setTimeout(() => pendingCompletes.delete(id), 3000);
-      // Update state from server response
-      state.tasks = state.tasks.filter(t => t.id !== id);
-      state.level = result.level;
-      state.xp = result.xp;
-      state.xpMax = result.xpMax;
-      state.completed = result.completed;
-      state.streak = result.streak;
-      state.combo = result.combo;
+  if (result && result.success) {
+    setTimeout(() => pendingCompletes.delete(id), 3000);
+    state.level = result.level;
+    state.xp = result.xp;
+    state.xpMax = result.xpMax;
+    state.completed = result.completed;
+    state.streak = result.streak;
+    state.combo = result.combo;
 
-      // Add to history
-      addToHistory('Task completed', result.xpEarned);
+    const newAch = result.newAchievements || [];
+    processNewAchievements(newAch, result.leveledUp);
 
-      // Show achievements
-      const newAch = result.newAchievements || [];
-      newAch.forEach(achId => {
-        state.achievements[achId] = true;
-        const ach = ACHIEVEMENTS.find(a => a.id === achId);
-        if (ach) addToHistory(ach.name, 100, ach.icon);
-      });
+    if (state.combo > 1) playSound('combo');
 
-      // Show level up (with achievements if any) or standalone achievements
-      if (result.leveledUp) {
-        showPopup('levelup', newAch);
-      } else {
-        newAch.forEach((achId, i) => setTimeout(() => showPopup('achievement', achId), i * 500));
-      }
+    comboTimer = setTimeout(async () => {
+      await api('/api/combo/reset', { method: 'POST' });
+      state.combo = 0;
+      updateUI();
+    }, COMBO_TIMEOUT_MS);
 
-      if (state.combo > 1) playSound('combo');
-
-      // Start combo timer - will reset combo after timeout
-      comboTimer = setTimeout(async () => {
-        await api('/api/combo/reset', { method: 'POST' });
-        state.combo = 0;
-        updateUI();
-      }, COMBO_TIMEOUT_MS);
-
+    renderAchievements();
+    updateUI();
+  } else {
+    // Rollback: restore task if request failed
+    pendingCompletes.delete(id);
+    if (savedTask) {
+      state.tasks.splice(taskIdx, 0, savedTask);
       renderTasks();
-      renderAchievements();
       updateUI();
     }
-  }, TASK_COMPLETE_ANIMATION_MS);
+  }
 }
 
 async function deleteTask(id, el) {
@@ -769,13 +1163,98 @@ async function editTask(id, newText) {
   setTimeout(() => pendingEdits.delete(id), 3000);
 }
 
+// ========== AUTO-RESIZE TEXTAREA ==========
+function autoResizeTextarea(el) {
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+
+$('task-input').addEventListener('input', () => autoResizeTextarea($('task-input')));
+$('quick-task-input').addEventListener('input', () => autoResizeTextarea($('quick-task-input')));
+
+function resetTextarea(el) {
+  el.value = '';
+  el.style.height = 'auto';
+  el.focus();
+}
+
 // ========== EVENT LISTENERS ==========
 $('add-task-form').onsubmit = e => {
   e.preventDefault();
   addTask($('task-input').value);
-  $('task-input').value = '';
-  $('task-input').focus();
+  resetTextarea($('task-input'));
 };
+
+$('task-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    $('add-task-form').requestSubmit();
+  }
+});
+
+// ========== XP BAR → NEXT TAB ==========
+document.querySelector('.xp-container-full').addEventListener('click', () => {
+  const idx = getActiveTabIndex();
+  const next = (idx + 1) % TAB_ORDER.length;
+  switchTab(TAB_ORDER[next], 1);
+});
+
+// ========== SEARCH TOGGLE (header magnifier) ==========
+$('search-toggle').addEventListener('click', e => {
+  e.stopPropagation();
+  const socialSearch = $('social-search');
+  const activeTab = document.querySelector('.tab-btn.active');
+  const onSocial = activeTab && activeTab.dataset.tab === 'social';
+
+  if (onSocial) {
+    // Already on social — toggle search bar
+    socialSearch.classList.toggle('show');
+    if (socialSearch.classList.contains('show')) $('user-search-input').focus();
+  } else {
+    // Switch to social tab, show search bar
+    const oldIdx = getActiveTabIndex();
+    const newIdx = TAB_ORDER.indexOf('social');
+    switchTab('social', newIdx - oldIdx);
+    socialSearch.classList.add('show');
+    setTimeout(() => $('user-search-input').focus(), 100);
+  }
+});
+
+// ========== QUICK ADD TOGGLE ==========
+$('add-task-toggle').addEventListener('click', e => {
+  e.stopPropagation();
+  const row = $('quick-add-row');
+  const visible = row.style.display !== 'none';
+  row.style.display = visible ? 'none' : 'flex';
+  if (!visible) $('quick-task-input').focus();
+});
+
+document.addEventListener('click', e => {
+  const row = $('quick-add-row');
+  if (row.style.display === 'none') return;
+  if (e.target.closest('#quick-add-row, #add-task-toggle')) return;
+  row.style.display = 'none';
+});
+
+document.addEventListener('click', e => {
+  const ss = $('social-search');
+  if (!ss.classList.contains('show')) return;
+  if (e.target.closest('#social-search, #search-toggle')) return;
+  ss.classList.remove('show');
+});
+
+function quickAddSubmit() {
+  const input = $('quick-task-input');
+  const text = input.value.trim();
+  if (!text) return;
+  addTask(text);
+  resetTextarea(input);
+}
+
+$('quick-add-submit').addEventListener('click', quickAddSubmit);
+$('quick-task-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); quickAddSubmit(); }
+});
 
 // ========== SCHEDULE TOGGLE ==========
 $('schedule-toggle')?.addEventListener('click', () => {
@@ -824,6 +1303,7 @@ $('version-btn').onclick = () => alert('Coming soon!');
 
 document.addEventListener('click', initAudio, { once: true });
 document.addEventListener('keydown', initAudio, { once: true });
+document.addEventListener('pointerdown', initAudio, { once: true });
 
 // ========== SETTINGS DROPDOWN ==========
 const [sToggle, sDrop] = [$('settings-toggle'), $('settings-dropdown')];
@@ -832,95 +1312,201 @@ document.addEventListener('click', e => { if (!sDrop.contains(e.target) && !sTog
 document.addEventListener('keydown', e => { if (e.key === 'Escape') sDrop.classList.remove('show'); });
 
 // ========== TABS ==========
-function initTabs() {
+const TAB_ORDER = ['todo', 'social', 'history', 'achievements'];
+
+function switchTab(tabId, direction) {
+  if (_tabAnimating) return;
+
   const tabBtns = document.querySelectorAll('.tab-btn');
   const tabContents = document.querySelectorAll('.tab-content');
   const socialSearch = $('social-search');
 
+  const currentBtn = document.querySelector('.tab-btn.active');
+  if (currentBtn && currentBtn.dataset.tab === tabId) return;
+
+  const leavingTodo = currentBtn && currentBtn.dataset.tab === 'todo';
+
+  // Update active button and aria
+  tabBtns.forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); });
+  const newBtn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+  if (newBtn) { newBtn.classList.add('active'); newBtn.setAttribute('aria-selected', 'true'); }
+
+  // Determine slide direction
+  const slideOut = direction > 0 ? 'slide-out-left' : 'slide-out-right';
+  const slideIn = direction > 0 ? 'slide-in-right' : 'slide-in-left';
+
+  // Find current visible tab and target tab
+  let oldTab = null;
+  let newTab = null;
+  tabContents.forEach(content => {
+    if (content.id === `tab-${tabId}`) newTab = content;
+    else if (content.style.display !== 'none') oldTab = content;
+  });
+
+  const container = document.querySelector('.main-content');
+  _tabAnimating = true;
+
+  // 1. Freeze container so children can be absolute/fixed without collapse
+  container.style.height = container.clientHeight + 'px';
+  container.style.overflow = 'visible';
+
+  // 2. Pull old tab out of flow
+  if (oldTab) oldTab.classList.add('tab-animating');
+
+  // 3. New tab out of flow BEFORE display (never enters flex)
+  if (newTab) {
+    newTab.classList.add('tab-animating');
+    newTab.style.display = newTab.id === 'tab-todo' ? 'flex' : 'block';
+  }
+
+  // 3b. Pre-render drum so it's visible during slide-in animation
+  if (tabId === 'todo') {
+    _tabAnimating = false;
+    renderTasks();
+    _tabAnimating = true;
+  }
+
+  // 4. Start animations on next frame
+  let animsDone = 0;
+  const totalAnims = (oldTab ? 1 : 0) + (newTab ? 1 : 0);
+
+  function onAnimDone() {
+    animsDone++;
+    if (animsDone < totalAnims) return;
+
+    if (oldTab) {
+      oldTab.style.display = 'none';
+      oldTab.classList.remove('tab-animating', slideOut);
+    }
+    if (newTab) {
+      newTab.classList.remove('tab-animating', slideIn);
+    }
+    container.style.height = '';
+    container.style.overflow = '';
+    _tabAnimating = false;
+
+    // Mark drum for reset when returning to todo tab
+    if (leavingTodo) _drumNeedsReset = true;
+  }
+
+  requestAnimationFrame(() => {
+    if (oldTab) {
+      oldTab.classList.add(slideOut);
+      oldTab.addEventListener('animationend', onAnimDone, { once: true });
+    }
+    if (newTab) {
+      newTab.classList.add(slideIn);
+      newTab.addEventListener('animationend', onAnimDone, { once: true });
+    }
+  });
+
+  // Hide search bar when leaving social tab
+  if (tabId !== 'social') socialSearch.classList.remove('show');
+  sDrop.classList.remove('show');
+  if (tabId === 'history') renderHistory();
+  if (tabId === 'social') loadFriendsData();
+}
+
+function getActiveTabIndex() {
+  const active = document.querySelector('.tab-btn.active');
+  return active ? TAB_ORDER.indexOf(active.dataset.tab) : 0;
+}
+
+function initTabs() {
+  const tabBtns = document.querySelectorAll('.tab-btn');
+
   tabBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       const tabId = btn.dataset.tab;
-
-      // Update active button and aria
-      tabBtns.forEach(b => {
-        b.classList.remove('active');
-        b.setAttribute('aria-selected', 'false');
-      });
-      btn.classList.add('active');
-      btn.setAttribute('aria-selected', 'true');
-
-      // Show selected content
-      tabContents.forEach(content => {
-        content.style.display = content.id === `tab-${tabId}` ? 'block' : 'none';
-      });
-
-      // Show/hide search for SOCIAL tab
-      socialSearch.classList.toggle('show', tabId === 'social');
-
-      // Close dropdown after tab switch
-      sDrop.classList.remove('show');
-
-      // Render content if needed
-      if (tabId === 'history') renderHistory();
-      if (tabId === 'social') loadFriendsData();
+      const oldIdx = getActiveTabIndex();
+      const newIdx = TAB_ORDER.indexOf(tabId);
+      switchTab(tabId, newIdx - oldIdx);
     });
   });
+
+  // Keyboard: Left/Right arrows to switch tabs
+  document.addEventListener('keydown', e => {
+    if (e.target.closest('input, textarea, [contenteditable="true"]')) return;
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    // Don't interfere with drum up/down
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') return;
+    const idx = getActiveTabIndex();
+    const dir = e.key === 'ArrowRight' ? 1 : -1;
+    const next = idx + dir;
+    if (next < 0 || next >= TAB_ORDER.length) return;
+    e.preventDefault();
+    switchTab(TAB_ORDER[next], dir);
+  });
+
+  // Swipe: touch gesture to switch tabs
+  let _swipeStartX = 0;
+  let _swipeStartY = 0;
+  const mainContent = document.querySelector('.main-content');
+
+  mainContent.addEventListener('touchstart', e => {
+    _swipeStartX = e.touches[0].clientX;
+    _swipeStartY = e.touches[0].clientY;
+  }, { passive: true });
+
+  mainContent.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - _swipeStartX;
+    const dy = e.changedTouches[0].clientY - _swipeStartY;
+    // Only horizontal swipes (dx > dy) with min 50px threshold
+    if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return;
+    const idx = getActiveTabIndex();
+    const dir = dx < 0 ? 1 : -1; // swipe left = next, swipe right = prev
+    const next = idx + dir;
+    if (next < 0 || next >= TAB_ORDER.length) return;
+    switchTab(TAB_ORDER[next], dir);
+  }, { passive: true });
 }
 
 
 // ========== HISTORY ==========
-function addToHistory(action, points, icon = null) {
-  const item = {
-    id: Date.now(),
-    action: action,
-    icon: icon,
-    points: points,
-    timestamp: new Date().toISOString()
-  };
+const HISTORY_ICONS = {
+  task_created: '\uD83D\uDCDD',
+  task_completed: '\u2705'
+};
 
-  state.history = state.history || [];
-  state.history.unshift(item);
-
-  // Keep last 50 entries
-  if (state.history.length > 50) {
-    state.history = state.history.slice(0, 50);
-  }
-
-  // Save to localStorage
-  localStorage.setItem('questTodoHistory', JSON.stringify(state.history));
-}
-
-function loadHistory() {
-  try {
-    const saved = localStorage.getItem('questTodoHistory');
-    if (saved) {
-      state.history = JSON.parse(saved);
-    }
-  } catch (e) {
-    state.history = [];
-  }
-}
-
-function renderHistory() {
+async function renderHistory() {
   const list = $('history-list');
   const empty = $('history-empty');
 
-  // Only show entries with XP
-  const xpHistory = (state.history || []).filter(item => item.points > 0);
+  const result = await api('/api/history');
+  if (!result || !result.history) return;
 
-  if (xpHistory.length === 0) {
-    list.innerHTML = '';
+  const items = result.history;
+
+  if (items.length === 0) {
+    list.textContent = '';
     empty.classList.add('show');
     return;
   }
 
   empty.classList.remove('show');
-  list.innerHTML = xpHistory.map(item => `
-    <li class="history-item">
-      <span class="history-action">${item.icon ? item.icon + ' ' : ''}${esc(item.action)}</span>
-      <span class="history-points">+${item.points} XP</span>
-      <span class="history-time">${formatTime(item.timestamp)}</span>
-    </li>`).join('');
+  list.textContent = '';
+  items.forEach(item => {
+    const icon = HISTORY_ICONS[item.type] || '';
+
+    const li = document.createElement('li');
+    li.className = 'history-item';
+    li.onclick = () => li.classList.toggle('expanded');
+
+    const actionSpan = document.createElement('span');
+    actionSpan.className = 'history-action';
+    actionSpan.textContent = icon + ' ' + (item.text || '');
+
+    const pointsSpan = document.createElement('span');
+    pointsSpan.className = 'history-points';
+    pointsSpan.textContent = '+' + item.points + ' XP';
+
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'history-time';
+    timeSpan.textContent = formatTime(item.timestamp);
+
+    li.append(actionSpan, pointsSpan, timeSpan);
+    list.appendChild(li);
+  });
 }
 
 function formatTime(timestamp) {
@@ -932,7 +1518,7 @@ function formatTime(timestamp) {
 
 // ========== FRIENDS API ==========
 let feedOffset = 0;
-let feedHasMore = false;
+
 
 async function searchUsers(query) {
   if (query.length < 2) return { users: [] };
@@ -1135,11 +1721,11 @@ async function loadFriendsFeed(append = false) {
   const feedData = await getFriendsFeed(20, feedOffset);
   if (!feedData) return;
 
-  feedHasMore = feedData.has_more;
+  const hasMore = feedData.has_more;
   renderFriendsFeed(feedData.feed || [], append);
 
   const loadMoreBtn = $('load-more-feed');
-  loadMoreBtn.style.display = feedHasMore ? 'block' : 'none';
+  loadMoreBtn.style.display = hasMore ? 'block' : 'none';
 }
 
 function renderFriendsFeed(feed, append = false) {
@@ -1257,13 +1843,6 @@ $('load-more-feed')?.addEventListener('click', async () => {
   await loadFriendsFeed(true);
 });
 
-// ========== HORIZONTAL SCROLL ==========
-$('achievements-grid')?.addEventListener('wheel', e => {
-  if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-    e.preventDefault();
-    e.currentTarget.scrollLeft += e.deltaY;
-  }
-}, { passive: false });
 
 // ========== MEDIA POPUP ==========
 function openMediaPopup(taskId) {
@@ -1527,14 +2106,14 @@ function reinitVideoHandlers() {
 }
 
 // ========== SOCIAL LIGHTBOX ==========
-function openSocialLightbox(src, isVideo) {
+function openSocialLightbox(src) {
   const lightbox = $('social-lightbox');
   const content = $('social-lightbox-content');
-  if (isVideo) {
-    content.innerHTML = `<video src="${src}" autoplay playsinline></video>`;
-  } else {
-    content.innerHTML = `<img src="${src}" alt="">`;
-  }
+  const img = document.createElement('img');
+  img.src = src;
+  img.alt = '';
+  content.textContent = '';
+  content.appendChild(img);
   lightbox.classList.add('show');
 }
 
@@ -1558,7 +2137,7 @@ $('friends-feed')?.addEventListener('click', e => {
     if (media.tagName === 'VIDEO') {
       openVideoFullscreen(media.src);
     } else {
-      openSocialLightbox(media.src, false);
+      openSocialLightbox(media.src);
     }
   }
 });
@@ -1577,15 +2156,50 @@ if (isMobileDevice) initMobileVideoObserver();
 initTabs();
 initTaskDrag();
 initSearch();
-loadHistory();
+
+// Re-render drum on resize to adjust row count
+window.addEventListener('resize', () => { if (!_tabAnimating) renderTasks(); });
+
+// Auto-scroll to current task after 10s of inactivity
+let _idleTimer = null;
+function resetIdleTimer() {
+  clearTimeout(_idleTimer);
+  _idleTimer = setTimeout(() => {
+    // Skip if user is typing, menu is open, or quick-add is open
+    if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.contentEditable === 'true')) return;
+    if ($('settings-dropdown')?.classList.contains('show')) return;
+    if ($('quick-add-row')?.style.display !== 'none') return;
+    scrollToCurrentTask();
+  }, 10000);
+}
+document.addEventListener('mousemove', resetIdleTimer);
+document.addEventListener('keydown', resetIdleTimer);
+document.addEventListener('pointerdown', resetIdleTimer);
+document.addEventListener('scroll', resetIdleTimer);
+resetIdleTimer();
+// history loaded on-demand from server when tab is opened
 
 // Load state from server
-loadState().then(() => {
-  $('task-input').focus();
+loadState().then(async () => {
   // Connect to WebSocket after initial load
   connectWebSocket();
   // Check Google Calendar connection
   checkGoogleCalendarStatus();
+
+  // Wait for fonts to be ready (prevents text reflow)
+  if (document.fonts && document.fonts.ready) {
+    await document.fonts.ready;
+  }
+
+  // First rAF: layout is calculated, render with correct dimensions
+  requestAnimationFrame(() => {
+    // Instant jump to current task (no animation)
+    scrollToCurrentTask(true);
+    // Second rAF: browser has painted, safe to show
+    requestAnimationFrame(() => {
+      document.body.classList.add('ready');
+    });
+  });
 });
 
 // ========== AUTO-REFRESH ==========
@@ -1618,9 +2232,43 @@ function startAutoRefresh() {
 // Start auto-refresh
 startAutoRefresh();
 
+// ========== DEV FILE HASH POLLING ==========
+let _devCssHash = null;
+let _devOtherHash = null;
+let _devPollTimer = null;
+
+function startDevPoll() {
+  if (_devPollTimer) return;
+  _devPollTimer = setInterval(async () => {
+    if (document.hidden) return;
+    try {
+      const res = await fetch('/api/files-hash');
+      if (!res.ok) return;
+      const { css, other } = await res.json();
+      if (_devCssHash === null) { _devCssHash = css; _devOtherHash = other; return; }
+      if (other !== _devOtherHash) {
+        console.log('🔄 Dev files changed — reloading page');
+        window.location.reload(true);
+        return;
+      }
+      if (css !== _devCssHash) {
+        console.log('🔄 CSS changed — hot-swapping styles');
+        _devCssHash = css;
+        document.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
+          const url = new URL(link.href);
+          url.searchParams.set('_r', Date.now());
+          link.href = url.toString();
+        });
+      }
+    } catch {}
+  }, 5000);
+}
+startDevPoll();
+
 // Stop auto-refresh and WebSocket on page unload
 window.addEventListener('beforeunload', () => {
   if (refreshTimer) clearInterval(refreshTimer);
+  if (_devPollTimer) clearInterval(_devPollTimer);
   if (socket) {
     socket.close();
     console.log('WebSocket connection closed');

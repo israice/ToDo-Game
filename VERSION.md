@@ -32,25 +32,6 @@ git commit -m "v0.0.33 - test 2"
 git push
 
 # DEV LOG
-v0.0.21 - webhook auto-deploy + all-in-one start scripts
-v0.0.22 - graceful reload (zero downtime deploys)
-v0.0.23 - Add SSE events for real-time task updates
-v0.0.24 - gunicorn for automatic code reloading
-v0.0.25 - multi-tab support with unique tab IDs for SSE connections
-v0.0.26 - Modify docker-compose.yml to mount Docker socket for Telegram bot
-v0.0.27 - websocket instead SSE
-v0.0.28 - websocket tested with telegram actions
-v0.0.29 - update auto-refresh logic to use WebSocket instead of SSE
-v0.0.30 - track WebSocket connection state and refresh on reconnect
-v0.0.31 - more ative tasks in list less paddings
-v0.0.32 - test 1
-v0.0.33 - test 2
-v0.0.34 - changed to FastAPI and Bitwarden support
-v0.0.35 - server test 1
-v0.0.36 - server test 2
-v0.0.37 - server test 3
-v0.0.38 - server test 4
-v0.0.39 - server test 5
 v0.0.40 - server test 6
 v0.0.41 - improved documentation behavior
 v0.0.42 - improved configuration loading
@@ -58,4 +39,6 @@ v0.0.43 - version update test 1
 v0.0.44 - changed to english version
 v0.0.45 - added data of start and deadline
 v0.0.46 - added google calendar support
-v0.0.47 - Picker Wheel for table                                                                                        
+v0.0.47 - Picker Wheel for table
+v0.0.48 - Fullscreen drum roller
+v0.0.49 - added keyboard swiping pages right and left

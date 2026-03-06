@@ -17,16 +17,15 @@
         <!-- Particles container for effects -->
         <div id="particles"></div>
 
-        <!-- Combo indicator -->
-        <div class="combo-container" id="combo-container">
-            <span class="combo-fire">&#128293;</span>
-            <span class="combo-count">x<span id="combo">0</span></span>
-        </div>
-
+        <div class="header-block">
         <div class="xp-row">
             <div class="level-badge">
                 <span class="level-icon">&#9733;</span>
                 <span class="level-text">LVL <span id="level-top">1</span></span>
+            </div>
+            <div class="combo-badge" id="combo-container">
+                <span class="combo-fire">&#128293;</span>
+                <span class="combo-count">x<span id="combo">0</span></span>
             </div>
             <div class="xp-container-full">
                 <div class="xp-bar">
@@ -34,6 +33,12 @@
                     <span class="xp-text"><span id="xp">0</span>/<span id="xp-max">100</span></span>
                 </div>
             </div>
+            <button class="search-toggle-btn" id="search-toggle" aria-label="Search users">
+                <span>&#128269;</span>
+            </button>
+            <button class="add-task-btn" id="add-task-toggle" aria-label="Add task">
+                <span>+</span>
+            </button>
             <div class="settings-wrapper">
                 <button class="settings-btn" id="settings-toggle" aria-label="User">
                     <span class="user-icon"></span>
@@ -72,13 +77,12 @@
                     <!-- Add task form -->
                     <form class="add-task-form" id="add-task-form" role="form" aria-label="Add new quest">
                         <div class="input-wrapper">
-                            <input
-                                type="text"
+                            <textarea
                                 id="task-input"
                                 placeholder="New quest..."
                                 autocomplete="off"
-                                maxlength="100"
-                            >
+                                rows="1"
+                            ></textarea>
                             <button type="button" class="schedule-toggle-btn" id="schedule-toggle" aria-label="Set schedule" title="Set schedule">&#128197;</button>
                             <button type="submit" class="add-btn" id="add-btn">
                                 <span class="btn-icon">+</span>
@@ -148,6 +152,11 @@
                 </div>
             </div>
         </div>
+        <div class="quick-add-row" id="quick-add-row" style="display: none;">
+            <textarea id="quick-task-input" placeholder="New quest..." autocomplete="off" rows="1"></textarea>
+            <button type="button" class="quick-add-submit" id="quick-add-submit">Add</button>
+        </div>
+        </div>
 
         <!-- Main content -->
         <main class="main-content">
@@ -161,7 +170,7 @@
             </div>
 
             <!-- Tab: TODO -->
-            <div class="tab-content" id="tab-todo" role="tabpanel" style="display: block;">
+            <div class="tab-content" id="tab-todo" role="tabpanel" style="display: flex;">
 
                 <!-- Tasks list -->
                 <div class="tasks-section">
@@ -302,6 +311,12 @@
 
     </div>
 
+    <script>
+        window.DRUM_ROW_HEIGHT = {{ drum_row_height }};
+        window.DRUM_MAX_TOP_ANGLE = {{ drum_max_top_angle }};
+        window.DRUM_PERSPECTIVE_K = {{ drum_perspective_k }};
+        window.DRUM_HIGHLIGHT_OFFSET = {{ drum_highlight_offset }};
+    </script>
     <script src="{{ url_for('static', path='app.js') }}?v={{ app_version }}"></script>
 </body>
 </html>
