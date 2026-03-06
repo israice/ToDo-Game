@@ -303,12 +303,7 @@ function handleWebSocketEvent(event, data) {
       }
       const idx = state.tasks.findIndex(t => t.id === data.id);
       if (idx !== -1) state.tasks.splice(idx, 1);
-      state.level = data.level;
-      state.xp = data.xp;
-      state.xpMax = data.xpMax;
-      state.completed = data.completed;
-      state.streak = data.streak;
-      state.combo = data.combo;
+      Object.assign(state, { level: data.level, xp: data.xp, xpMax: data.xpMax, completed: data.completed, streak: data.streak, combo: data.combo });
       const wsAch = data.newAchievements || [];
       processNewAchievements(wsAch, data.leveledUp);
       if (state.combo > 1) playSound('combo');
@@ -400,7 +395,7 @@ function formatTaskDate(iso) {
   if (!iso) return { day: '', time: '' };
   const d = new Date(iso);
   if (isNaN(d.getTime())) return { day: '', time: '' };
-  const day = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const day = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
   const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   return { day, time };
 }
@@ -412,11 +407,11 @@ function getHourFromISO(iso) {
 }
 
 // ========== RENDER TASKS (3D Drum Roller) ==========
-const ROW_HEIGHT_SETTING = window.DRUM_ROW_HEIGHT || 20;
-const MAX_TOP_ANGLE = window.DRUM_MAX_TOP_ANGLE || 85;
-const PERSP_K = window.DRUM_PERSPECTIVE_K || 2;
-
-const HIGHLIGHT_OFFSET = window.DRUM_HIGHLIGHT_OFFSET ?? 2;
+const _bd = document.body.dataset;
+const ROW_HEIGHT_SETTING = Number(_bd.drumRowHeight) || 20;
+const MAX_TOP_ANGLE = Number(_bd.drumMaxTopAngle) || 85;
+const PERSP_K = Number(_bd.drumPerspectiveK) || 2;
+const HIGHLIGHT_OFFSET = Number(_bd.drumHighlightOffset) ?? 2;
 
 function getDrumParams() {
   const list = $('tasks-list');
@@ -497,10 +492,12 @@ function renderTasks() {
     const pMedia = document.createElement('span'); pMedia.className = 'task-media'; pMedia.textContent = '\uD83D\uDDBC\uFE0F';
     const pCheck = document.createElement('label'); pCheck.className = 'task-checkbox';
     const pIcon = document.createElement('span'); pIcon.className = 'task-time-icon';
+    const pDates = document.createElement('div'); pDates.className = 'task-dates';
     const pDate1 = document.createElement('span'); pDate1.className = 'task-date';
     const pDate2 = document.createElement('span'); pDate2.className = 'task-date';
+    pDates.append(pDate1, pDate2);
     const pDel = document.createElement('button'); pDel.className = 'task-delete';
-    probe.append(pMedia, pCheck, pIcon, pText, pDate1, pDate2, pDel);
+    probe.append(pMedia, pCheck, pIcon, pText, pDates, pDel);
     list.appendChild(probe);
     centerH = probe.offsetHeight;
     list.removeChild(probe);
@@ -581,8 +578,13 @@ function renderTasks() {
     textSpan.className = 'task-text';
     textSpan.textContent = task.text;
 
-    const startDateSpan = createDateSpan(start);
-    const endDateSpan = createDateSpan(end, 'task-deadline');
+    const sameDate = start.day && end.day && start.day === end.day && start.time === end.time;
+    const startDateSpan = createDateSpan(start, sameDate ? 'task-date-same' : 'task-date-start');
+    const endDateSpan = createDateSpan(end, sameDate ? 'task-date-same' : 'task-date-end');
+    const datesWrapper = document.createElement('div');
+    datesWrapper.className = 'task-dates';
+    datesWrapper.appendChild(startDateSpan);
+    datesWrapper.appendChild(endDateSpan);
 
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'task-delete';
@@ -597,8 +599,7 @@ function renderTasks() {
     li.appendChild(checkLabel);
     li.appendChild(timeIcon);
     li.appendChild(textSpan);
-    li.appendChild(startDateSpan);
-    li.appendChild(endDateSpan);
+    li.appendChild(datesWrapper);
     li.appendChild(deleteBtn);
 
     checkInput.onchange = () => completeTask(task.id, li);
@@ -713,8 +714,10 @@ function initTaskDrag() {
 
   const ROW_PX = 30; // pixels of drag per 1 row shift
   let startY = 0;
+  let startX = 0;
   let startRawOffset = 0;
   let isDragging = false;
+  let directionLocked = false;
   let tapTarget = null;
   let _prevTickOffset = scrollOffset;
 
@@ -736,12 +739,31 @@ function initTaskDrag() {
 
   function onPointerMove(e) {
     if (!isDragging) return;
+    const deltaX = e.clientX - startX;
+    const deltaY = e.clientY - startY;
+
+    // Determine direction on first significant movement
+    if (!directionLocked && (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8)) {
+      if (Math.abs(deltaX) > Math.abs(deltaY)) {
+        // Horizontal — release capture so swipe can work
+        isDragging = false;
+        directionLocked = false;
+        list.releasePointerCapture(e.pointerId);
+        document.removeEventListener('pointermove', onPointerMove);
+        document.removeEventListener('pointerup', onPointerUp);
+        list.classList.remove('dragging');
+        clearTimeout(_listLongPressTimer);
+        _listLongPressTimer = null;
+        return;
+      }
+      directionLocked = true;
+    }
+
     // Cancel long press if user starts dragging
-    if (_listLongPressTimer && Math.abs(e.clientY - startY) > 5) {
+    if (_listLongPressTimer && Math.abs(deltaY) > 5) {
       clearTimeout(_listLongPressTimer);
       _listLongPressTimer = null;
     }
-    const deltaY = e.clientY - startY;
     const rawOffset = startRawOffset + deltaY / ROW_PX;
     scrollOffset = Math.round(rawOffset);
     drumFraction = rawOffset - scrollOffset;
@@ -882,7 +904,9 @@ function initTaskDrag() {
     cancelAnimationFrame(_drumSnapRaf);
     _drumScrollTarget = null;
     isDragging = true;
+    directionLocked = false;
     startY = e.clientY;
+    startX = e.clientX;
     // Include leftover fraction so re-grab mid-snap feels continuous
     startRawOffset = scrollOffset + drumFraction;
     list.classList.add('dragging');
@@ -1099,12 +1123,7 @@ async function completeTask(id, el) {
 
   if (result && result.success) {
     setTimeout(() => pendingCompletes.delete(id), 3000);
-    state.level = result.level;
-    state.xp = result.xp;
-    state.xpMax = result.xpMax;
-    state.completed = result.completed;
-    state.streak = result.streak;
-    state.combo = result.combo;
+    Object.assign(state, { level: result.level, xp: result.xp, xpMax: result.xpMax, completed: result.completed, streak: result.streak, combo: result.combo });
 
     const newAch = result.newAchievements || [];
     processNewAchievements(newAch, result.leveledUp);
@@ -1169,8 +1188,7 @@ function autoResizeTextarea(el) {
   el.style.height = el.scrollHeight + 'px';
 }
 
-$('task-input').addEventListener('input', () => autoResizeTextarea($('task-input')));
-$('quick-task-input').addEventListener('input', () => autoResizeTextarea($('quick-task-input')));
+['task-input','quick-task-input'].forEach(id => $(id).addEventListener('input', () => autoResizeTextarea($(id))));
 
 function resetTextarea(el) {
   el.value = '';
@@ -1229,19 +1247,14 @@ $('add-task-toggle').addEventListener('click', e => {
   if (!visible) $('quick-task-input').focus();
 });
 
-document.addEventListener('click', e => {
-  const row = $('quick-add-row');
-  if (row.style.display === 'none') return;
-  if (e.target.closest('#quick-add-row, #add-task-toggle')) return;
-  row.style.display = 'none';
-});
-
-document.addEventListener('click', e => {
-  const ss = $('social-search');
-  if (!ss.classList.contains('show')) return;
-  if (e.target.closest('#social-search, #search-toggle')) return;
-  ss.classList.remove('show');
-});
+function closeOnClickOutside(elId, toggleId, closeAction) {
+  document.addEventListener('click', e => {
+    if (e.target.closest(`#${elId}, #${toggleId}`)) return;
+    closeAction();
+  });
+}
+closeOnClickOutside('quick-add-row', 'add-task-toggle', () => { $('quick-add-row').style.display = 'none'; });
+closeOnClickOutside('social-search', 'search-toggle', () => { $('social-search').classList.remove('show'); });
 
 function quickAddSubmit() {
   const input = $('quick-task-input');
@@ -1301,9 +1314,7 @@ async function toggleSetting(key, transform = v => !v) {
 $('sound-toggle').onclick = () => toggleSetting('sound');
 $('version-btn').onclick = () => alert('Coming soon!');
 
-document.addEventListener('click', initAudio, { once: true });
-document.addEventListener('keydown', initAudio, { once: true });
-document.addEventListener('pointerdown', initAudio, { once: true });
+['click','keydown','pointerdown'].forEach(e => document.addEventListener(e, initAudio, { once: true }));
 
 // ========== SETTINGS DROPDOWN ==========
 const [sToggle, sDrop] = [$('settings-toggle'), $('settings-dropdown')];
@@ -1564,22 +1575,15 @@ function renderSearchResults(users) {
 
   empty?.classList.remove('show');
   container.innerHTML = users.map(user => {
-    let btnClass = 'add-friend-btn';
-    let btnText = 'Add';
-    let btnDisabled = '';
-
-    if (user.friendship_status === 'friends') {
-      btnClass += ' disabled';
-      btnText = 'Friends';
-      btnDisabled = 'disabled';
-    } else if (user.friendship_status === 'pending_sent') {
-      btnClass += ' pending';
-      btnText = 'Pending';
-      btnDisabled = 'disabled';
-    } else if (user.friendship_status === 'pending_received') {
-      btnClass += ' accept';
-      btnText = 'Accept';
-    }
+    const statusMap = {
+      friends: { cls: ' disabled', text: 'Friends', disabled: 'disabled' },
+      pending_sent: { cls: ' pending', text: 'Pending', disabled: 'disabled' },
+      pending_received: { cls: ' accept', text: 'Accept', disabled: '' }
+    };
+    const s = statusMap[user.friendship_status] || { cls: '', text: 'Add', disabled: '' };
+    const btnClass = 'add-friend-btn' + s.cls;
+    const btnText = s.text;
+    const btnDisabled = s.disabled;
 
     return `
       <div class="user-card" data-user-id="${user.id}">
@@ -2156,7 +2160,11 @@ initTaskDrag();
 initSearch();
 
 // Re-render drum on resize to adjust row count
-window.addEventListener('resize', () => { if (!_tabAnimating) renderTasks(); });
+window.addEventListener('resize', () => {
+  if (_tabAnimating) return;
+  if ($('tasks-list')?.classList.contains('editing')) return;
+  renderTasks();
+});
 
 // Auto-scroll to current task after 10s of inactivity
 let _idleTimer = null;
@@ -2170,10 +2178,7 @@ function resetIdleTimer() {
     scrollToCurrentTask();
   }, 10000);
 }
-document.addEventListener('mousemove', resetIdleTimer);
-document.addEventListener('keydown', resetIdleTimer);
-document.addEventListener('pointerdown', resetIdleTimer);
-document.addEventListener('scroll', resetIdleTimer);
+['mousemove','keydown','pointerdown','scroll'].forEach(e => document.addEventListener(e, resetIdleTimer));
 resetIdleTimer();
 // history loaded on-demand from server when tab is opened
 

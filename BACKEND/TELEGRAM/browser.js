@@ -79,15 +79,22 @@ class ApiService {
     return this.sessions.get(userId);
   }
 
+  _checkAccountInUse(username, userId) {
+    for (const [uid, session] of this.sessions.entries()) {
+      if (session.username === username && uid !== userId) {
+        return { success: false, error: 'This account is already in use by another user', alreadyInUse: true };
+      }
+    }
+    return null;
+  }
+
   async login(userId, username, password) {
     console.log(`User ${userId} logging in as "${username}"...`);
 
-    // Check if this username is already in use
-    for (const [uid, session] of this.sessions.entries()) {
-      if (session.username === username && uid !== userId) {
-        console.log(`✗ Login failed: account "${username}" is already in use by user ${uid}`);
-        return { success: false, error: 'This account is already in use by another user', alreadyInUse: true };
-      }
+    const inUse = this._checkAccountInUse(username, userId);
+    if (inUse) {
+      console.log(`✗ Login failed: account "${username}" is already in use`);
+      return inUse;
     }
 
     try {
@@ -115,12 +122,10 @@ class ApiService {
   async register(userId, username, password) {
     console.log(`User ${userId} registering as "${username}"...`);
 
-    // Check if this username is already in use
-    for (const [uid, session] of this.sessions.entries()) {
-      if (session.username === username && uid !== userId) {
-        console.log(`✗ Registration failed: account "${username}" is already in use by user ${uid}`);
-        return { success: false, error: 'This account is already in use by another user', alreadyInUse: true };
-      }
+    const inUse = this._checkAccountInUse(username, userId);
+    if (inUse) {
+      console.log(`✗ Registration failed: account "${username}" is already in use`);
+      return inUse;
     }
 
     try {
@@ -184,104 +189,58 @@ class ApiService {
     return result;
   }
 
-  async completeTask(userId, index) {
+  async _getTaskByIndex(userId, index) {
     const session = this.sessions.get(userId);
-    if (!session) {
-      throw new Error('Not authenticated');
-    }
+    if (!session) throw new Error('Not authenticated');
 
-    // First get tasks to find the one at index
     const tasksResult = await this._request('GET', '/api/bot/tasks', { token: session.token });
-    if (!tasksResult.success) {
-      throw new Error('Failed to get tasks');
-    }
+    if (!tasksResult.success) throw new Error('Failed to get tasks');
 
     const tasks = tasksResult.tasks;
     if (index < 0 || index >= tasks.length) {
       console.log(`Task index ${index + 1} out of range (total: ${tasks.length})`);
-      return;
+      return null;
     }
+    return { task: tasks[index], tasks };
+  }
 
-    const task = tasks[index];
+  async completeTask(userId, index) {
+    const result = await this._getTaskByIndex(userId, index);
+    if (!result) return;
+    const { task } = result;
+
     console.log(`User ${userId} completing task #${index + 1}: "${task.text}"`);
-
-    const result = await this._request('POST', `/api/bot/tasks/${task.id}/complete`, { 
-      token: session.token 
-    });
-    
-    if (!result.success) {
-      throw new Error(result.error || 'Failed to complete task');
-    }
-    
+    const session = this.sessions.get(userId);
+    const res = await this._request('POST', `/api/bot/tasks/${task.id}/complete`, { token: session.token });
+    if (!res.success) throw new Error(res.error || 'Failed to complete task');
     console.log('✓ Task completed successfully');
-    return result;
+    return res;
   }
 
   async deleteTask(userId, index) {
-    const session = this.sessions.get(userId);
-    if (!session) {
-      throw new Error('Not authenticated');
-    }
+    const result = await this._getTaskByIndex(userId, index);
+    if (!result) return;
+    const { task } = result;
 
-    // First get tasks to find the one at index
-    const tasksResult = await this._request('GET', '/api/bot/tasks', { token: session.token });
-    if (!tasksResult.success) {
-      throw new Error('Failed to get tasks');
-    }
-
-    const tasks = tasksResult.tasks;
-    if (index < 0 || index >= tasks.length) {
-      console.log(`Task index ${index + 1} out of range (total: ${tasks.length})`);
-      return;
-    }
-
-    const task = tasks[index];
     console.log(`User ${userId} deleting task #${index + 1}: "${task.text}"`);
-
-    const result = await this._request('POST', `/api/bot/tasks/${task.id}/delete`, { 
-      token: session.token 
-    });
-    
-    if (!result.success) {
-      throw new Error(result.error || 'Failed to delete task');
-    }
-    
+    const session = this.sessions.get(userId);
+    const res = await this._request('POST', `/api/bot/tasks/${task.id}/delete`, { token: session.token });
+    if (!res.success) throw new Error(res.error || 'Failed to delete task');
     console.log('✓ Task deleted successfully');
-    return result;
+    return res;
   }
 
   async renameTask(userId, index, newText) {
-    const session = this.sessions.get(userId);
-    if (!session) {
-      throw new Error('Not authenticated');
-    }
+    const result = await this._getTaskByIndex(userId, index);
+    if (!result) return;
+    const { task } = result;
 
-    // First get tasks to find the one at index
-    const tasksResult = await this._request('GET', '/api/bot/tasks', { token: session.token });
-    if (!tasksResult.success) {
-      throw new Error('Failed to get tasks');
-    }
-
-    const tasks = tasksResult.tasks;
-    if (index < 0 || index >= tasks.length) {
-      console.log(`Task index ${index + 1} out of range (total: ${tasks.length})`);
-      return;
-    }
-
-    const task = tasks[index];
     console.log(`User ${userId} renaming task #${index + 1} to: "${newText}"`);
-
-    const result = await this._request('POST', `/api/bot/tasks/${task.id}/rename`, { 
-      token: session.token,
-      text: newText 
-    });
-    
-    if (!result.success) {
-      throw new Error(result.error || 'Failed to rename task');
-    }
-    
+    const session = this.sessions.get(userId);
+    const res = await this._request('POST', `/api/bot/tasks/${task.id}/rename`, { token: session.token, text: newText });
+    if (!res.success) throw new Error(res.error || 'Failed to rename task');
     console.log('✓ Task renamed successfully');
-    return result;
+    return res;
   }
 
   async closeUserSession(userId) {

@@ -316,18 +316,12 @@ setTimeout(() => {
 
 console.log('API service ready. Use /stop to close all sessions.');
 
-process.once('SIGINT', async () => {
-  console.log('\n🛑 Server stopped by user (Ctrl+C)...');
-  await api.close();
-  bot.stop('SIGINT');
-  console.log('✅ Server stopped\n');
-  process.exit(0);
-});
-
-process.once('SIGTERM', async () => {
-  console.log('\n🛑 Server stopping (SIGTERM)...');
-  await api.close();
-  bot.stop('SIGTERM');
-  console.log('✅ Server stopped\n');
-  process.exit(0);
-});
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.once(sig, async () => {
+    console.log(`\n🛑 Server stopping (${sig})...`);
+    await api.close();
+    bot.stop(sig);
+    console.log('✅ Server stopped\n');
+    process.exit(0);
+  });
+}

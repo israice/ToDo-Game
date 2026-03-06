@@ -44,3 +44,4 @@ v0.0.48 - Fullscreen drum roller
 v0.0.49 - added keyboard swiping pages right and left
 v0.0.50 - new screenshots
 v0.0.51 - added enddless keyboard totation of tabs
+v0.0.52 - code refactoring

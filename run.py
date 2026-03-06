@@ -331,6 +331,77 @@ def apply_xp(progress, xp_amount):
         leveled_up = True
     return new_xp, new_level, new_xp_max, leveled_up
 
+def _gcal_service(conn, user_id):
+    """Get Google Calendar service and calendar ID for user, or (None, None)."""
+    from BACKEND.google_calendar import get_google_credentials, get_calendar_service
+    creds = get_google_credentials(conn, user_id, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
+    if not creds:
+        return None, None
+    service = get_calendar_service(creds)
+    cal_row = conn.execute('SELECT calendar_id FROM google_tokens WHERE user_id = ?', (user_id,)).fetchone()
+    cal_id = cal_row['calendar_id'] if cal_row else 'primary'
+    return service, cal_id
+
+def _complete_task_logic(conn, user_id, task, client_combo=None):
+    """Shared completion logic: combo, XP, streak, achievements. Returns result dict."""
+    progress = get_or_create_progress(conn, user_id)
+    combo = (client_combo + 1) if client_combo is not None else (progress['combo'] + 1)
+    xp_earned = int(task['xp_reward'] * (1 + combo * 0.1))
+    new_xp, new_level, new_xp_max, leveled_up = apply_xp(progress, xp_earned)
+
+    today, last_date = date.today().isoformat(), progress['last_completion_date']
+    new_streak = progress['current_streak']
+    if last_date != today:
+        if last_date:
+            diff = (date.today() - date.fromisoformat(str(last_date))).days
+            new_streak = new_streak + 1 if diff == 1 else 1
+        else:
+            new_streak = 1
+    new_completed = progress['completed_tasks'] + 1
+
+    state = {'completed': new_completed, 'combo': combo, 'level': new_level, 'streak': new_streak}
+    existing = {a['achievement_id'] for a in conn.execute('SELECT achievement_id FROM user_achievements WHERE user_id = ?', (user_id,))}
+    new_achievements = [ach['id'] for ach in ACHIEVEMENTS if ach['id'] not in existing and ach['check'](state)]
+    for ach_id in new_achievements:
+        conn.execute('INSERT INTO user_achievements (user_id, achievement_id) VALUES (?, ?)', (user_id, ach_id))
+
+    achievement_xp = len(new_achievements) * 100
+    if achievement_xp > 0:
+        temp_progress = {'xp': new_xp, 'level': new_level, 'xp_max': new_xp_max}
+        new_xp, new_level, new_xp_max, ach_leveled = apply_xp(temp_progress, achievement_xp)
+        leveled_up = leveled_up or ach_leveled
+        xp_earned += achievement_xp
+
+    conn.execute('''UPDATE user_progress SET level=?, xp=?, xp_max=?, completed_tasks=?,
+                    current_streak=?, combo=?, last_completion_date=? WHERE user_id=?''',
+                 (new_level, new_xp, new_xp_max, new_completed, new_streak, combo, today, user_id))
+
+    return {
+        'xp_earned': xp_earned, 'level': new_level, 'xp': new_xp, 'xp_max': new_xp_max,
+        'completed': new_completed, 'streak': new_streak, 'combo': combo,
+        'leveled_up': leveled_up, 'new_achievements': new_achievements
+    }
+
+def _validate_task_text(data):
+    """Validate task text from request data. Returns (text, error_response) -- one is always None."""
+    if not data or not data.get('text', '').strip():
+        return None, error_response('Task text is required')
+    text = data['text'].strip()
+    if len(text) > MAX_TASK_TEXT_LENGTH:
+        return None, error_response(f'Task text must be at most {MAX_TASK_TEXT_LENGTH} characters')
+    return text, None
+
+async def _parse_json(request):
+    """Parse JSON body, return {} on failure."""
+    try:
+        return await request.json()
+    except Exception:
+        return {}
+
+def _new_task_id():
+    """Generate unique task ID and random XP reward."""
+    return f"{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}", random.randint(20, 35)
+
 # Cache version after first read
 _version_cache = None
 
@@ -437,11 +508,7 @@ async def logout(request: Request):
 
 @app.post('/api/auth/login')
 async def api_login(request: Request):
-    try:
-        data = await request.json()
-    except Exception:
-        logger.debug('Failed to parse request JSON', exc_info=True)
-        data = {}
+    data = await _parse_json(request)
     username = data.get('username', '').strip()
     password = data.get('password', '')
 
@@ -470,11 +537,7 @@ async def api_login(request: Request):
 
 @app.post('/api/auth/register')
 async def api_register(request: Request):
-    try:
-        data = await request.json()
-    except Exception:
-        logger.debug('Failed to parse request JSON', exc_info=True)
-        data = {}
+    data = await _parse_json(request)
     username = data.get('username', '').strip()
     password = data.get('password', '')
 
@@ -509,11 +572,7 @@ async def api_register(request: Request):
 
 @app.post('/api/auth/logout')
 async def api_logout(request: Request):
-    try:
-        data = await request.json()
-    except Exception:
-        logger.debug('Failed to parse request JSON', exc_info=True)
-        data = {}
+    data = await _parse_json(request)
     token = data.get('token', '')
 
     with get_db() as conn:
@@ -552,19 +611,16 @@ async def api_update_settings(request: Request, user_id: int = Depends(get_authe
 @app.post('/api/tasks')
 async def api_create_task(request: Request, user_id: int = Depends(get_authenticated_user)):
     data = await request.json()
-    if not data or not data.get('text', '').strip():
-        return error_response('Task text is required')
-    if len(data['text'].strip()) > MAX_TASK_TEXT_LENGTH:
-        return error_response(f'Task text must be at most {MAX_TASK_TEXT_LENGTH} characters')
-    task_id = f"{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
-    xp = random.randint(20, 35)
+    text, err = _validate_task_text(data)
+    if err: return err
+    task_id, xp = _new_task_id()
     scheduled_start = data.get('scheduled_start') or None
     scheduled_end = data.get('scheduled_end') or None
 
     google_event_id = None
     with get_db() as conn:
         conn.execute('INSERT INTO tasks (id, user_id, text, xp_reward, scheduled_start, scheduled_end) VALUES (?, ?, ?, ?, ?, ?)',
-                     (task_id, user_id, data['text'].strip(), xp, scheduled_start, scheduled_end))
+                     (task_id, user_id, text, xp, scheduled_start, scheduled_end))
         progress = get_or_create_progress(conn, user_id)
         new_xp, new_level, new_xp_max, leveled_up = apply_xp(progress, 3)
         conn.execute('UPDATE user_progress SET xp=?, level=?, xp_max=? WHERE user_id=?',
@@ -572,33 +628,30 @@ async def api_create_task(request: Request, user_id: int = Depends(get_authentic
 
         # Sync to Google Calendar
         if GOOGLE_CALENDAR_ENABLED:
-            from BACKEND.google_calendar import get_google_credentials, get_calendar_service, create_calendar_event
-            creds = get_google_credentials(conn, user_id, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
-            if creds:
-                try:
-                    service = get_calendar_service(creds)
-                    cal_row = conn.execute('SELECT calendar_id FROM google_tokens WHERE user_id = ?', (user_id,)).fetchone()
-                    cal_id = cal_row['calendar_id'] if cal_row else 'primary'
-                    google_event_id = create_calendar_event(service, cal_id, data['text'].strip(), scheduled_start, scheduled_end)
+            try:
+                service, cal_id = _gcal_service(conn, user_id)
+                if service:
+                    from BACKEND.google_calendar import create_calendar_event
+                    google_event_id = create_calendar_event(service, cal_id, text, scheduled_start, scheduled_end)
                     if google_event_id:
                         conn.execute('UPDATE tasks SET google_event_id = ? WHERE id = ?', (google_event_id, task_id))
-                except Exception:
-                    logger.error('Failed to sync new task to Google Calendar', exc_info=True)
+            except Exception:
+                logger.error('Failed to sync new task to Google Calendar', exc_info=True)
 
         # Log activity
         conn.execute('''INSERT INTO activity_log (user_id, activity_type, task_text, xp_earned)
-                        VALUES (?, 'task_created', ?, ?)''', (user_id, data['text'].strip(), 3))
+                        VALUES (?, 'task_created', ?, ?)''', (user_id, text, 3))
 
         conn.commit()
 
     await send_user_event(user_id, 'task_created', {
-        'id': task_id, 'text': data['text'].strip(), 'xp': xp,
+        'id': task_id, 'text': text, 'xp': xp,
         'scheduled_start': scheduled_start, 'scheduled_end': scheduled_end,
         'xpEarned': 3, 'level': new_level, 'currentXp': new_xp, 'xpMax': new_xp_max, 'leveledUp': leveled_up
     })
 
     return JSONResponse({
-        'id': task_id, 'text': data['text'].strip(), 'xp': xp,
+        'id': task_id, 'text': text, 'xp': xp,
         'scheduled_start': scheduled_start, 'scheduled_end': scheduled_end,
         'xpEarned': 3, 'level': new_level, 'currentXp': new_xp, 'xpMax': new_xp_max, 'leveledUp': leveled_up
     })
@@ -606,11 +659,8 @@ async def api_create_task(request: Request, user_id: int = Depends(get_authentic
 @app.put('/api/tasks/{task_id}')
 async def api_update_task(task_id: str, request: Request, user_id: int = Depends(get_authenticated_user)):
     data = await request.json()
-    if not data or not data.get('text', '').strip():
-        return error_response('Task text is required')
-    if len(data['text'].strip()) > MAX_TASK_TEXT_LENGTH:
-        return error_response(f'Task text must be at most {MAX_TASK_TEXT_LENGTH} characters')
-    text = data['text'].strip()
+    text, err = _validate_task_text(data)
+    if err: return err
     scheduled_start = data.get('scheduled_start')
     scheduled_end = data.get('scheduled_end')
 
@@ -631,16 +681,13 @@ async def api_update_task(task_id: str, request: Request, user_id: int = Depends
         if GOOGLE_CALENDAR_ENABLED:
             task = conn.execute('SELECT google_event_id, scheduled_start, scheduled_end FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
             if task and task['google_event_id']:
-                from BACKEND.google_calendar import get_google_credentials, get_calendar_service, update_calendar_event
-                creds = get_google_credentials(conn, user_id, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
-                if creds:
-                    try:
-                        service = get_calendar_service(creds)
-                        cal_row = conn.execute('SELECT calendar_id FROM google_tokens WHERE user_id = ?', (user_id,)).fetchone()
-                        cal_id = cal_row['calendar_id'] if cal_row else 'primary'
+                try:
+                    service, cal_id = _gcal_service(conn, user_id)
+                    if service:
+                        from BACKEND.google_calendar import update_calendar_event
                         update_calendar_event(service, cal_id, task['google_event_id'], text, task['scheduled_start'], task['scheduled_end'])
-                    except Exception:
-                        logger.error('Failed to sync task update to Google Calendar', exc_info=True)
+                except Exception:
+                    logger.error('Failed to sync task update to Google Calendar', exc_info=True)
 
         conn.commit()
 
@@ -659,16 +706,13 @@ async def api_delete_task(task_id: str, user_id: int = Depends(get_authenticated
         if GOOGLE_CALENDAR_ENABLED:
             task = conn.execute('SELECT google_event_id FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
             if task and task['google_event_id']:
-                from BACKEND.google_calendar import get_google_credentials, get_calendar_service, delete_calendar_event
-                creds = get_google_credentials(conn, user_id, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
-                if creds:
-                    try:
-                        service = get_calendar_service(creds)
-                        cal_row = conn.execute('SELECT calendar_id FROM google_tokens WHERE user_id = ?', (user_id,)).fetchone()
-                        cal_id = cal_row['calendar_id'] if cal_row else 'primary'
+                try:
+                    service, cal_id = _gcal_service(conn, user_id)
+                    if service:
+                        from BACKEND.google_calendar import delete_calendar_event
                         delete_calendar_event(service, cal_id, task['google_event_id'])
-                    except Exception:
-                        logger.error('Failed to sync task deletion to Google Calendar', exc_info=True)
+                except Exception:
+                    logger.error('Failed to sync task deletion to Google Calendar', exc_info=True)
 
         conn.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id))
         conn.commit()
@@ -683,77 +727,38 @@ async def api_complete_task(task_id: str, request: Request, user_id: int = Depen
         if not task:
             return error_response('Task not found', 404)
 
-        progress = get_or_create_progress(conn, user_id)
-        try:
-            data = await request.json()
-        except Exception:
-            logger.debug('Failed to parse request JSON', exc_info=True)
-            data = {}
-        client_combo = data.get('combo', 0)
-        combo = client_combo + 1
-        xp_earned = int(task['xp_reward'] * (1 + combo * 0.1))
-
-        new_xp, new_level, new_xp_max, leveled_up = apply_xp(progress, xp_earned)
-
-        today, last_date = date.today().isoformat(), progress['last_completion_date']
-        new_streak = progress['current_streak']
-        if last_date != today:
-            if last_date:
-                diff = (date.today() - date.fromisoformat(str(last_date))).days
-                new_streak = new_streak + 1 if diff == 1 else 1
-            else:
-                new_streak = 1
-        new_completed = progress['completed_tasks'] + 1
-
-        state = {'completed': new_completed, 'combo': combo, 'level': new_level, 'streak': new_streak}
-        existing = {a['achievement_id'] for a in conn.execute('SELECT achievement_id FROM user_achievements WHERE user_id = ?', (user_id,))}
-        new_achievements = [ach['id'] for ach in ACHIEVEMENTS if ach['id'] not in existing and ach['check'](state)]
-        for ach_id in new_achievements:
-            conn.execute('INSERT INTO user_achievements (user_id, achievement_id) VALUES (?, ?)', (user_id, ach_id))
-
-        achievement_xp = len(new_achievements) * 100
-        if achievement_xp > 0:
-            temp_progress = {'xp': new_xp, 'level': new_level, 'xp_max': new_xp_max}
-            new_xp, new_level, new_xp_max, ach_leveled = apply_xp(temp_progress, achievement_xp)
-            leveled_up = leveled_up or ach_leveled
-            xp_earned += achievement_xp
-
-        conn.execute('''UPDATE user_progress SET level=?, xp=?, xp_max=?, completed_tasks=?,
-                        current_streak=?, combo=?, last_completion_date=? WHERE user_id=?''',
-                     (new_level, new_xp, new_xp_max, new_completed, new_streak, combo, today, user_id))
+        data = await _parse_json(request)
+        r = _complete_task_logic(conn, user_id, task, data.get('combo', 0))
 
         # Log activity
         media = conn.execute('SELECT media_type, filename FROM task_media WHERE task_id = ?', (task_id,)).fetchone()
         extra_data = json.dumps({'media_type': media['media_type'], 'media_url': f"/UPLOADS/{media['filename']}"}) if media else None
         conn.execute('''INSERT INTO activity_log (user_id, activity_type, task_text, xp_earned, extra_data)
-                        VALUES (?, 'task_completed', ?, ?, ?)''', (user_id, task['text'], xp_earned, extra_data))
+                        VALUES (?, 'task_completed', ?, ?, ?)''', (user_id, task['text'], r['xp_earned'], extra_data))
 
         # Delete Google Calendar event on completion
         if GOOGLE_CALENDAR_ENABLED and task['google_event_id']:
-            from BACKEND.google_calendar import get_google_credentials, get_calendar_service, delete_calendar_event
-            creds = get_google_credentials(conn, user_id, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
-            if creds:
-                try:
-                    service = get_calendar_service(creds)
-                    cal_row = conn.execute('SELECT calendar_id FROM google_tokens WHERE user_id = ?', (user_id,)).fetchone()
-                    cal_id = cal_row['calendar_id'] if cal_row else 'primary'
+            try:
+                service, cal_id = _gcal_service(conn, user_id)
+                if service:
+                    from BACKEND.google_calendar import delete_calendar_event
                     delete_calendar_event(service, cal_id, task['google_event_id'])
-                except Exception:
-                    logger.error('Failed to delete calendar event on task completion', exc_info=True)
+            except Exception:
+                logger.error('Failed to delete calendar event on task completion', exc_info=True)
 
         conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
         conn.commit()
 
     await send_user_event(user_id, 'task_completed', {
-        'id': task_id, 'xpEarned': xp_earned, 'level': new_level, 'xp': new_xp, 'xpMax': new_xp_max,
-        'completed': new_completed, 'streak': new_streak, 'combo': combo,
-        'leveledUp': leveled_up, 'newAchievements': new_achievements
+        'id': task_id, 'xpEarned': r['xp_earned'], 'level': r['level'], 'xp': r['xp'], 'xpMax': r['xp_max'],
+        'completed': r['completed'], 'streak': r['streak'], 'combo': r['combo'],
+        'leveledUp': r['leveled_up'], 'newAchievements': r['new_achievements']
     })
 
     return JSONResponse({
-        'success': True, 'xpEarned': xp_earned, 'level': new_level, 'xp': new_xp, 'xpMax': new_xp_max,
-        'completed': new_completed, 'streak': new_streak, 'combo': combo,
-        'leveledUp': leveled_up, 'newAchievements': new_achievements
+        'success': True, 'xpEarned': r['xp_earned'], 'level': r['level'], 'xp': r['xp'], 'xpMax': r['xp_max'],
+        'completed': r['completed'], 'streak': r['streak'], 'combo': r['combo'],
+        'leveledUp': r['leveled_up'], 'newAchievements': r['new_achievements']
     })
 
 @app.get('/api/history')
@@ -792,20 +797,11 @@ async def bot_get_tasks(user_id: int = Depends(get_token_authenticated_user)):
 
 @app.post('/api/bot/tasks/add')
 async def bot_add_task(request: Request, user_id: int = Depends(get_token_authenticated_user)):
-    try:
-        data = await request.json()
-    except Exception:
-        logger.debug('Failed to parse request JSON', exc_info=True)
-        data = {}
-    text = data.get('text', '').strip()
+    data = await _parse_json(request)
+    text, err = _validate_task_text(data)
+    if err: return err
 
-    if not text:
-        return JSONResponse({'success': False, 'error': 'Task text required'}, status_code=400)
-    if len(text) > MAX_TASK_TEXT_LENGTH:
-        return JSONResponse({'success': False, 'error': f'Task text must be at most {MAX_TASK_TEXT_LENGTH} characters'}, status_code=400)
-
-    task_id = f"{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
-    xp = random.randint(20, 35)
+    task_id, xp = _new_task_id()
 
     with get_db() as conn:
         conn.execute('INSERT INTO tasks (id, user_id, text, xp_reward) VALUES (?, ?, ?, ?)',
@@ -834,35 +830,18 @@ async def bot_complete_task(task_id: str, request: Request, user_id: int = Depen
         if not task:
             return JSONResponse({'success': False, 'error': 'Task not found'}, status_code=404)
 
-        progress = get_or_create_progress(conn, user_id)
-        combo = progress['combo'] + 1
-        xp_earned = int(task['xp_reward'] * (1 + combo * 0.1))
-        new_xp, new_level, new_xp_max, leveled_up = apply_xp(progress, xp_earned)
-
-        today, last_date = date.today().isoformat(), progress['last_completion_date']
-        new_streak = progress['current_streak']
-        if last_date != today:
-            if last_date:
-                diff = (date.today() - date.fromisoformat(str(last_date))).days
-                new_streak = new_streak + 1 if diff == 1 else 1
-            else:
-                new_streak = 1
-        new_completed = progress['completed_tasks'] + 1
-
-        conn.execute('''UPDATE user_progress SET level=?, xp=?, xp_max=?, completed_tasks=?,
-                        current_streak=?, combo=?, last_completion_date=? WHERE user_id=?''',
-                     (new_level, new_xp, new_xp_max, new_completed, new_streak, combo, today, user_id))
+        r = _complete_task_logic(conn, user_id, task)
         conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
         conn.commit()
 
     await send_user_event(user_id, 'task_completed', {
-        'id': task_id, 'xpEarned': xp_earned, 'level': new_level, 'xp': new_xp, 'xpMax': new_xp_max,
-        'completed': new_completed, 'streak': new_streak, 'combo': combo,
-        'leveledUp': leveled_up, 'newAchievements': []
+        'id': task_id, 'xpEarned': r['xp_earned'], 'level': r['level'], 'xp': r['xp'], 'xpMax': r['xp_max'],
+        'completed': r['completed'], 'streak': r['streak'], 'combo': r['combo'],
+        'leveledUp': r['leveled_up'], 'newAchievements': r['new_achievements']
     })
 
     return JSONResponse({
-        'success': True, 'xpEarned': xp_earned, 'level': new_level, 'leveledUp': leveled_up
+        'success': True, 'xpEarned': r['xp_earned'], 'level': r['level'], 'leveledUp': r['leveled_up']
     })
 
 @app.post('/api/bot/tasks/{task_id}/delete')
@@ -876,17 +855,9 @@ async def bot_delete_task(task_id: str, user_id: int = Depends(get_token_authent
 
 @app.post('/api/bot/tasks/{task_id}/rename')
 async def bot_rename_task(task_id: str, request: Request, user_id: int = Depends(get_token_authenticated_user)):
-    try:
-        data = await request.json()
-    except Exception:
-        logger.debug('Failed to parse request JSON', exc_info=True)
-        data = {}
-    text = data.get('text', '').strip()
-
-    if not text:
-        return JSONResponse({'success': False, 'error': 'Task text required'}, status_code=400)
-    if len(text) > MAX_TASK_TEXT_LENGTH:
-        return JSONResponse({'success': False, 'error': f'Task text must be at most {MAX_TASK_TEXT_LENGTH} characters'}, status_code=400)
+    data = await _parse_json(request)
+    text, err = _validate_task_text(data)
+    if err: return err
 
     with get_db() as conn:
         conn.execute('UPDATE tasks SET text = ? WHERE id = ? AND user_id = ?', (text, task_id, user_id))
@@ -1412,15 +1383,6 @@ async def _do_calendar_sync():
         parse_event_times, strip_prefix
     )
 
-    def _sync_user(user_id, sync_token, calendar_id):
-        with get_db() as conn:
-            creds = get_google_credentials(conn, user_id, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
-            if not creds:
-                return None
-            service = get_calendar_service(creds)
-            events, new_token, is_full = sync_calendar_events(service, calendar_id, sync_token)
-            return conn, creds, service, events, new_token, is_full
-
     with get_db() as conn:
         users = conn.execute('SELECT user_id, sync_token, calendar_id FROM google_tokens').fetchall()
 
@@ -1481,8 +1443,7 @@ async def _do_calendar_sync():
                         })
                     elif start_iso and end_iso:
                         # New event with dates → create task
-                        task_id = f"{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
-                        xp = random.randint(20, 35)
+                        task_id, xp = _new_task_id()
                         conn.execute(
                             'INSERT INTO tasks (id, user_id, text, xp_reward, scheduled_start, scheduled_end, google_event_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
                             (task_id, user_id, text, xp, start_iso, end_iso, event_id)

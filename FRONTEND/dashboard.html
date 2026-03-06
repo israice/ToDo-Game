@@ -11,7 +11,7 @@
     <meta http-equiv="Expires" content="0">
     <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}?v={{ app_version }}">
 </head>
-<body>
+<body data-drum-row-height="{{ drum_row_height }}" data-drum-max-top-angle="{{ drum_max_top_angle }}" data-drum-perspective-k="{{ drum_perspective_k }}" data-drum-highlight-offset="{{ drum_highlight_offset }}">
     <a href="#tasks-list" class="skip-to-content">Skip to tasks</a>
     <div class="app-container">
         <!-- Particles container for effects -->
@@ -311,12 +311,6 @@
 
     </div>
 
-    <script>
-        window.DRUM_ROW_HEIGHT = {{ drum_row_height }};
-        window.DRUM_MAX_TOP_ANGLE = {{ drum_max_top_angle }};
-        window.DRUM_PERSPECTIVE_K = {{ drum_perspective_k }};
-        window.DRUM_HIGHLIGHT_OFFSET = {{ drum_highlight_offset }};
-    </script>
-    <script src="{{ url_for('static', path='app.js') }}?v={{ app_version }}"></script>
+<script src="{{ url_for('static', path='app.js') }}?v={{ app_version }}"></script>
 </body>
 </html>
