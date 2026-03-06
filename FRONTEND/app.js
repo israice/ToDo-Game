@@ -1432,8 +1432,7 @@ function initTabs() {
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') return;
     const idx = getActiveTabIndex();
     const dir = e.key === 'ArrowRight' ? 1 : -1;
-    const next = idx + dir;
-    if (next < 0 || next >= TAB_ORDER.length) return;
+    const next = (idx + dir + TAB_ORDER.length) % TAB_ORDER.length;
     e.preventDefault();
     switchTab(TAB_ORDER[next], dir);
   });
@@ -1455,8 +1454,7 @@ function initTabs() {
     if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return;
     const idx = getActiveTabIndex();
     const dir = dx < 0 ? 1 : -1; // swipe left = next, swipe right = prev
-    const next = idx + dir;
-    if (next < 0 || next >= TAB_ORDER.length) return;
+    const next = (idx + dir + TAB_ORDER.length) % TAB_ORDER.length;
     switchTab(TAB_ORDER[next], dir);
   }, { passive: true });
 }
