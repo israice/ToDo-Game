@@ -261,16 +261,14 @@ body {
     position: relative;
   }
   .settings-submenu {
-    position: absolute; right: 100%; top: 0; min-width: 170px;
-    padding: var(--spacing-sm); background: var(--bg-card);
-    border: 1px solid var(--border-color); border-radius: 12px;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.4);
-    opacity: 0; visibility: hidden; transform: translateX(8px);
-    transition: all var(--transition-fast);
-    margin-right: 4px;
+    max-height: 0; overflow: hidden;
+    padding: 0 var(--spacing-sm);
+    transition: max-height var(--transition-fast), padding var(--transition-fast);
   }
-  .settings-item-wrapper:hover > .settings-submenu {
-    opacity: 1; visibility: visible; transform: translateX(0);
+  .settings-item-wrapper:hover > .settings-submenu,
+  .settings-item-wrapper.open > .settings-submenu {
+    max-height: 200px;
+    padding: var(--spacing-sm);
   }
 }
 
@@ -361,9 +359,9 @@ body {
   list-style: none;
   position: fixed;
   inset: 0;
-  width: 100vw;
+  width: 100%;
   height: 100vh;
-  touch-action: none;
+  touch-action: pan-x;
   user-select: none;
   cursor: grab;
   overflow: hidden;
@@ -379,6 +377,13 @@ body {
   position: absolute;
   top: 0; left: 0; right: 0; bottom: 0;
   transform-style: preserve-3d;
+}
+@media (max-width: 767px) {
+  .drum-wrapper { left: 4%; right: 4%; }
+}
+@media (max-width: 767px) {
+  .task-item .task-dates { display: none; }
+  .task-item.center .task-dates { display: flex; }
 }
 
 
@@ -400,6 +405,16 @@ body {
   &.center { border: 2px solid var(--accent-fire); border-radius: 10px; height: auto; min-height: 38px; }
   &.center .task-text { white-space: pre-wrap; overflow: visible; text-overflow: unset; }
   &:hover:not(.center) { border-color: var(--accent-primary); }
+  &.day-header {
+    border: none; background: transparent;
+    justify-content: center; padding-left: 14px;
+    height: 14px; min-height: 14px;
+    top: calc(50% - 7px);
+    font-size: 1.1rem; font-weight: 700;
+    color: var(--text-muted); text-transform: uppercase;
+    letter-spacing: 0.08em;
+    pointer-events: none;
+  }
   &.placeholder { border-style: dashed; }
   &.completing { animation: task-complete 0.3s ease forwards; }
 
@@ -431,6 +446,30 @@ body {
       &::after { content: '\2714'; color: white; font-size: 14px; opacity: 0; transform: scale(0); transition: all var(--transition-fast); }
     }
   }
+
+  .task-completed-icon {
+    cursor: pointer;
+    .checkbox-completed { font-size: 16px; display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; }
+  }
+
+  &.task-done .task-text { opacity: 0.45; }
+  &.task-done .task-time-icon { opacity: 0.45; }
+  &.task-done .task-dates { opacity: 0.45; }
+
+  .task-add-sub {
+    width: 20px; height: 20px; flex-shrink: 0;
+    background: transparent; border: 1.5px solid var(--border-color); border-radius: 50%;
+    color: var(--text-muted); font-size: 14px; font-weight: 700;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    padding: 0; line-height: 1; transition: all var(--transition-fast);
+    &:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+  }
+
+  &.subtask-item[data-depth="1"] { width: 95%; margin-left: auto; margin-right: auto; }
+  &.subtask-item[data-depth="2"] { width: 90.25%; margin-left: auto; margin-right: auto; }
+  &.subtask-item[data-depth="3"] { width: 85.74%; margin-left: auto; margin-right: auto; }
+  &.subtask-item[data-depth="4"] { width: 81.45%; margin-left: auto; margin-right: auto; }
+  &.subtask-item[data-depth="5"] { width: 77.38%; margin-left: auto; margin-right: auto; }
 
   .task-text {
     flex: 1; font-size: inherit; color: var(--text-primary);
@@ -556,7 +595,7 @@ body {
 #tab-todo.tab-animating {
   position: fixed;
   inset: 0;
-  width: 100vw;
+  width: 100%;
   height: 100vh;
   overflow: visible;
   z-index: 40;

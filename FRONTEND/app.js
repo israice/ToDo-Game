@@ -19,11 +19,8 @@ let state = {
 let comboTimer = null;
 let audioCtx = null;
 
-// WebSocket connection
-let socket = null;
-let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 10;
-const RECONNECT_DELAY_MS = 3000;
+// Polling interval for state sync (ms)
+const POLL_INTERVAL_MS = 5000;
 
 // Media popup state
 let currentMediaTaskId = null;
@@ -42,6 +39,7 @@ let _tabAnimating = false;
 // Drag-scroll offset for tasks carousel
 let scrollOffset = 0;
 let drumFraction = 0; // fractional offset for smooth 3D rotation (-0.5 to 0.5)
+let _drumList = []; // virtual list: { type:'task', task } or { type:'header', dayName }
 
 // ========== UTILITIES ==========
 function debounce(fn, delay) {
@@ -53,19 +51,66 @@ function debounce(fn, delay) {
 }
 
 function getSortedTasks() {
-  return [...state.tasks].sort((a, b) => {
+  return [...state.tasks].filter(t => !t.parent_id).sort((a, b) => {
     const sa = a.scheduled_start || '';
     const sb = b.scheduled_start || '';
-    if (sa && sb) return sa.localeCompare(sb);
+    if (sa && sb) return new Date(sa).getTime() - new Date(sb).getTime();
     if (sa) return -1;
     if (sb) return 1;
     return 0;
   });
 }
 
+function _getTaskDepth(taskId) {
+  let depth = 0;
+  let id = taskId;
+  while (id) {
+    const t = state.tasks.find(x => x.id === id);
+    if (!t || !t.parent_id) break;
+    id = t.parent_id;
+    depth++;
+    if (depth > 5) break;
+  }
+  return depth;
+}
+
+function buildDrumList(sorted) {
+  const list = [];
+  let lastDateKey = '';
+  // Build subtask map from full state (sorted already has only parents)
+  const subMap = {};
+  for (const t of state.tasks) {
+    if (t.parent_id) {
+      if (!subMap[t.parent_id]) subMap[t.parent_id] = [];
+      subMap[t.parent_id].push(t);
+    }
+  }
+  function insertWithChildren(task, type) {
+    list.push({ type, task });
+    const subs = subMap[task.id];
+    if (subs) {
+      for (const sub of subs) insertWithChildren(sub, 'subtask');
+    }
+  }
+  for (const task of sorted) {
+    const iso = task.scheduled_start || '';
+    if (iso) {
+      const d = new Date(iso);
+      const dateKey = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      if (dateKey !== lastDateKey) {
+        const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
+        list.push({ type: 'header', dayName });
+        lastDateKey = dateKey;
+      }
+    }
+    insertWithChildren(task, 'task');
+  }
+  return list;
+}
+
 function getDrumBounds(highlightIdx) {
   const min = -highlightIdx;
-  const max = Math.max(0, state.tasks.length - highlightIdx - 1);
+  const max = Math.max(0, _drumList.length - highlightIdx - 1);
   return { min, max };
 }
 
@@ -126,7 +171,7 @@ const ACHIEVEMENTS = [
   ['combo5', 'On Fire!', 'Reach combo x5', '&#9889;'],
   ['combo10', 'Unstoppable', 'Reach combo x10', '&#127775;'],
   ['level5', 'Rising Star', 'Reach level 5', '&#11088;'],
-  ['level10', 'Master', 'Reach level 10', '&#128142;'],
+  ['level10', 'Master', 'Reach level 10', '<img src="https://avatars.githubusercontent.com/u/1953053?s=400&u=d8370094252d77402f8073148d1168d1d0633d12&v=4" style="width:100%;height:100%;object-fit:cover;border-radius:50%">'],
   ['streak7', 'Weekly Warrior', 'Maintain a 7-day streak', '&#128170;'],
   ['streak30', 'Monthly Master', 'Maintain a 30-day streak', '&#127942;'],
 ].map(([id, name, desc, icon]) => ({ id, name, desc, icon }));
@@ -162,162 +207,6 @@ async function loadState() {
   
 }
 
-// Connection status indicator
-let connectionIndicator = null;
-function updateConnectionStatus(connected) {
-  if (!connectionIndicator) {
-    connectionIndicator = document.createElement('div');
-    connectionIndicator.id = 'connection-indicator';
-    connectionIndicator.style.cssText = 'position:fixed;bottom:10px;left:10px;padding:8px 12px;border-radius:4px;font-size:12px;z-index:9999;transition:opacity 0.3s;';
-    document.body.appendChild(connectionIndicator);
-  }
-
-  if (connected) {
-    connectionIndicator.style.background = '#00d9a5';
-    connectionIndicator.style.color = '#000';
-    connectionIndicator.textContent = '● Online';
-    connectionIndicator.style.opacity = '0';
-    setTimeout(() => {
-      if (connectionIndicator) connectionIndicator.style.opacity = '0';
-    }, 2000);
-  } else {
-    connectionIndicator.style.background = '#e74c3c';
-    connectionIndicator.style.color = '#fff';
-    connectionIndicator.textContent = '● No connection...';
-    connectionIndicator.style.opacity = '1';
-  }
-}
-
-// ========== WebSocket (Native) ==========
-
-let wasConnected = false;  // Track if we had a connection before
-
-function connectWebSocket() {
-  if (socket) {
-    socket.close();
-    socket = null;
-  }
-
-  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  socket = new WebSocket(`${protocol}//${location.host}/ws`);
-
-  socket.onopen = () => {
-    console.log('✓ WebSocket connected');
-    reconnectAttempts = 0;
-
-    // If reconnecting after disconnection, refresh state to catch missed events
-    if (wasConnected) {
-      console.log('🔄 Reconnected - refreshing state...');
-      loadState();
-    }
-    wasConnected = true;
-    updateConnectionStatus(true);
-  };
-
-  socket.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    handleWebSocketEvent(msg.event, msg.data);
-  };
-
-  socket.onclose = (e) => {
-    console.log('✗ WebSocket disconnected:', e.code, e.reason);
-
-    // Auth error - don't reconnect
-    if (e.code === 4001) return;
-
-    updateConnectionStatus(false);
-
-    if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-      reconnectAttempts++;
-      console.log(`🔄 Reconnecting (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
-      setTimeout(connectWebSocket, RECONNECT_DELAY_MS);
-    } else {
-      console.error('❌ Max reconnection attempts reached');
-      updateConnectionStatus(false);
-      setTimeout(() => window.location.reload(), 3000);
-    }
-  };
-
-  socket.onerror = (err) => {
-    console.error('❌ WebSocket error:', err);
-  };
-
-  console.log('📡 Connecting to WebSocket...');
-}
-
-function handleWebSocketEvent(event, data) {
-  switch (event) {
-    case 'connected':
-      console.log('✓ Authenticated:', data);
-      break;
-
-    case 'task_created':
-      console.log('📝 Task created (WS):', data);
-      if (pendingTasks.has(data.id)) {
-        console.log('⊘ Skipping duplicate task_created event for pending task:', data.id);
-        return;
-      }
-      const existingTask = state.tasks.find(t => t.id === data.id);
-      if (!existingTask) {
-        state.tasks.unshift({ id: data.id, text: data.text, xp: data.xp,
-          scheduled_start: data.scheduled_start, scheduled_end: data.scheduled_end });
-        if (data.xpEarned) {
-          state.level = data.level;
-          state.xp = data.currentXp;
-          state.xpMax = data.xpMax;
-          if (data.leveledUp) showPopup('levelup');
-        }
-        renderTasks();
-        updateUI();
-        playSound('add');
-      }
-      break;
-
-    case 'task_updated': {
-      if (pendingEdits.has(data.id)) return;
-      const task = state.tasks.find(t => t.id === data.id);
-      if (task) {
-        task.text = data.text;
-        if (data.scheduled_start !== undefined) task.scheduled_start = data.scheduled_start;
-        if (data.scheduled_end !== undefined) task.scheduled_end = data.scheduled_end;
-        renderTasks();
-      }
-      break;
-    }
-
-    case 'task_deleted': {
-      if (pendingDeletes.has(data.id)) return;
-      const taskIndex = state.tasks.findIndex(t => t.id === data.id);
-      if (taskIndex !== -1) {
-        state.tasks.splice(taskIndex, 1);
-        renderTasks();
-      }
-      break;
-    }
-
-    case 'task_completed': {
-      console.log('✅ Task completed (WS):', data);
-      if (pendingCompletes.has(data.id)) {
-        console.log('⊘ Skipping duplicate task_completed event for pending task:', data.id);
-        return;
-      }
-      const idx = state.tasks.findIndex(t => t.id === data.id);
-      if (idx !== -1) state.tasks.splice(idx, 1);
-      Object.assign(state, { level: data.level, xp: data.xp, xpMax: data.xpMax, completed: data.completed, streak: data.streak, combo: data.combo });
-      const wsAch = data.newAchievements || [];
-      processNewAchievements(wsAch, data.leveledUp);
-      if (state.combo > 1) playSound('combo');
-      renderTasks();
-      updateUI();
-      break;
-    }
-
-    case 'server_shutdown':
-      console.log('🔄 Server shutting down:', data.message);
-      setTimeout(() => window.location.reload(true), 2000);
-      break;
-  }
-}
 
 // ========== SOUND ==========
 function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
@@ -395,7 +284,7 @@ function formatTaskDate(iso) {
   if (!iso) return { day: '', time: '' };
   const d = new Date(iso);
   if (isNaN(d.getTime())) return { day: '', time: '' };
-  const day = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+  const day = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
   const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   return { day, time };
 }
@@ -415,11 +304,18 @@ const HIGHLIGHT_OFFSET = Number(_bd.drumHighlightOffset) ?? 2;
 
 function getDrumParams() {
   const list = $('tasks-list');
-  const h = list ? list.clientHeight : 700;
+  let h = list ? list.clientHeight : 700;
   if (h < 50) return { totalRows: 11, centerIdx: 5, highlightIdx: 5, radius: 220, angleStep: 11 };
 
   // How many rows fit the screen height
   const isLarge = window.innerWidth >= MOBILE_BREAKPOINT;
+  // On mobile, subtract header + input + tabs that overlay the drum
+  if (!isLarge) {
+    const header = document.querySelector('.header-block');
+    const tabs = document.querySelector('.tabs-container');
+    const overlay = (header ? header.offsetHeight : 0) + (tabs ? tabs.offsetHeight : 0);
+    h -= overlay;
+  }
   const rowHeight = isLarge ? ROW_HEIGHT_SETTING : Math.max(20, Math.round(ROW_HEIGHT_SETTING * 0.85));
   const raw = Math.max(7, Math.floor(h / rowHeight));
   const totalRows = raw % 2 === 1 ? raw : raw - 1; // ensure odd
@@ -428,9 +324,10 @@ function getDrumParams() {
   // On large screens, highlight row is above center
   const highlightIdx = isLarge ? Math.max(0, Math.min(totalRows - 1, centerIdx - HIGHLIGHT_OFFSET)) : centerIdx;
 
-  // Angle per row: spread rows evenly across ±MAX_TOP_ANGLE
-  const angleStep = MAX_TOP_ANGLE / centerIdx;
-  const topAngleRad = MAX_TOP_ANGLE * Math.PI / 180;
+  // Angle per row: spread rows evenly across ±maxAngle
+  const maxAngle = isLarge ? MAX_TOP_ANGLE : Math.min(MAX_TOP_ANGLE, 55);
+  const angleStep = maxAngle / centerIdx;
+  const topAngleRad = maxAngle * Math.PI / 180;
 
   // Radius with perspective compensation so projected top row hits screen edge
   const sinA = Math.sin(topAngleRad);
@@ -442,31 +339,41 @@ function getDrumParams() {
 
 function renderTasks() {
   if (_tabAnimating) return;   // drum reads clientHeight — wrong during transform
+  if ($('tasks-list')?.classList.contains('editing')) return; // don't destroy active edit
 
   if (_drumNeedsReset) {
     _drumNeedsReset = false;
     cancelAnimationFrame(_drumSnapRaf);
     _drumScrollTarget = null;
-    const idx = findCurrentTaskIndex();
-    const { highlightIdx } = getDrumParams();
-    scrollOffset = idx - highlightIdx;
+    _drumJumpToIdx = -2; // signal: find current task after _drumList is built
     drumFraction = 0;
   }
 
   const list = $('tasks-list');
   list.textContent = '';
-  const empty = state.tasks.length === 0;
+  const activeTasks = state.tasks.filter(t => !t.parent_id && !t.completed_at);
+  const empty = activeTasks.length === 0;
   $('empty-state').classList.toggle('show', empty);
 
   const sorted = getSortedTasks();
+  _drumList = buildDrumList(sorted);
 
   const { totalRows, centerIdx, highlightIdx, radius, angleStep } = getDrumParams();
+
+  // Jump to specific drumList index — uses highlightIdx computed just above
+  if (_drumJumpToIdx !== -1) {
+    let targetIdx = _drumJumpToIdx;
+    if (targetIdx === -2) targetIdx = findCurrentTaskIndex(true);
+    scrollOffset = targetIdx - highlightIdx;
+    _drumJumpToIdx = -1;
+  }
 
   // Clamp scrollOffset (skip during active scroll animation to avoid blocking it)
   const { min: minOffset, max: maxOffset } = getDrumBounds(highlightIdx);
   if (_drumScrollTarget === null) {
     scrollOffset = Math.max(minOffset, Math.min(maxOffset, scrollOffset));
   }
+
 
   // Set perspective proportional to radius for consistent visual depth
   list.style.perspective = Math.round(radius * PERSP_K) + 'px';
@@ -481,8 +388,9 @@ function renderTasks() {
   // Measure actual highlight card height to compute symmetric expand
   let expandExtra = 0;
   let centerH = 38; // default card height
-  if (highlightTaskIdx >= 0 && highlightTaskIdx < sorted.length) {
-    const ct = sorted[highlightTaskIdx];
+  const highlightEntry = (highlightTaskIdx >= 0 && highlightTaskIdx < _drumList.length) ? _drumList[highlightTaskIdx] : null;
+  if (highlightEntry && highlightEntry.type === 'task') {
+    const ct = highlightEntry.task;
     const probe = document.createElement('li');
     probe.className = 'task-item center';
     probe.style.cssText = 'position:absolute;left:8px;right:8px;visibility:hidden;pointer-events:none;';
@@ -514,16 +422,16 @@ function renderTasks() {
 
   for (let idx = 0; idx < totalRows; idx++) {
     const taskIdx = scrollOffset + idx;
-    let angle = (idx - centerIdx - drumFraction) * angleStep;
+    let angle = (centerIdx + drumFraction - idx) * angleStep;
     // Push non-highlight cards away symmetrically if highlight card is tall
     if (idx !== highlightIdx && expandExtra > 0) {
-      angle += Math.sign(idx - highlightIdx) * expandExtra;
+      angle -= Math.sign(idx - highlightIdx) * expandExtra;
     }
     const absAngle = Math.abs(angle);
     const opacity = Math.max(0.15, 1 - absAngle / 120);
 
     // Placeholder if out of bounds
-    if (taskIdx < 0 || taskIdx >= sorted.length) {
+    if (taskIdx < 0 || taskIdx >= _drumList.length) {
       const li = document.createElement('li');
       li.className = 'task-item placeholder';
       li.style.transform = 'rotateX(' + angle + 'deg) translateZ(' + radius + 'px)';
@@ -534,12 +442,28 @@ function renderTasks() {
       continue;
     }
 
-    const task = sorted[taskIdx];
+    const entry = _drumList[taskIdx];
+
+    // Day header row
+    if (entry.type === 'header') {
+      const li = document.createElement('li');
+      li.className = 'task-item day-header';
+      li.style.transform = 'rotateX(' + angle + 'deg) translateZ(' + radius + 'px)';
+      li.style.opacity = opacity;
+      li.dataset.drumIdx = idx;
+      li.textContent = entry.dayName;
+      wrapper.appendChild(li);
+      continue;
+    }
+
+    const task = entry.task;
     const li = document.createElement('li');
     const hour = getHourFromISO(task.scheduled_start);
     const { cls: timePeriod, icon: timeIconText } = getTimePeriodInfo(hour);
     const isHighlight = idx === highlightIdx;
-    li.className = 'task-item' + (timePeriod ? ' ' + timePeriod : '') + (isHighlight ? ' center' : '');
+    const depth = _getTaskDepth(task.id);
+    li.className = 'task-item' + (timePeriod ? ' ' + timePeriod : '') + (isHighlight ? ' center' : '') + (depth > 0 ? ' subtask-item' : '');
+    if (depth > 0) li.dataset.depth = depth;
     li.style.transform = 'rotateX(' + angle + 'deg) translateZ(' + radius + 'px)';
     li.style.opacity = opacity;
     // Center tall card symmetrically on drum axis
@@ -564,18 +488,32 @@ function renderTasks() {
       mediaSpan.textContent = '\uD83D\uDDBC\uFE0F';
     }
 
+    const isCompleted = !!task.completed_at;
+
     const checkLabel = document.createElement('label');
     checkLabel.className = 'task-checkbox';
-    const checkInput = document.createElement('input');
-    checkInput.type = 'checkbox';
-    checkInput.setAttribute('aria-label', 'Complete quest');
-    const checkCustom = document.createElement('span');
-    checkCustom.className = 'checkbox-custom';
-    checkLabel.appendChild(checkInput);
-    checkLabel.appendChild(checkCustom);
+    if (isCompleted) {
+      // Show completed icon instead of checkbox
+      checkLabel.classList.add('task-completed-icon');
+      const completedSpan = document.createElement('span');
+      completedSpan.className = 'checkbox-completed';
+      completedSpan.textContent = '\u2705';
+      checkLabel.appendChild(completedSpan);
+    } else {
+      const checkInput = document.createElement('input');
+      checkInput.type = 'checkbox';
+      checkInput.setAttribute('aria-label', 'Complete quest');
+      const checkCustom = document.createElement('span');
+      checkCustom.className = 'checkbox-custom';
+      checkLabel.appendChild(checkInput);
+      checkLabel.appendChild(checkCustom);
+    }
+
+    if (isCompleted) li.classList.add('task-done');
 
     const textSpan = document.createElement('span');
     textSpan.className = 'task-text';
+    textSpan.dir = 'auto';
     textSpan.textContent = task.text;
 
     const sameDate = start.day && end.day && start.day === end.day && start.time === end.time;
@@ -595,16 +533,31 @@ function renderTasks() {
     timeIcon.className = 'task-time-icon';
     timeIcon.textContent = timeIconText;
 
+    // Add subtask "+" button (hidden at nesting depth >= 5)
+    const nestDepth = _getTaskDepth(task.id);
+    const addSubBtn = document.createElement('button');
+    addSubBtn.className = 'task-add-sub';
+    addSubBtn.setAttribute('aria-label', 'Add subtask');
+    addSubBtn.textContent = '+';
+    if (nestDepth >= 5) addSubBtn.style.display = 'none';
+
     li.appendChild(mediaSpan);
     li.appendChild(checkLabel);
     li.appendChild(timeIcon);
     li.appendChild(textSpan);
+    li.appendChild(addSubBtn);
     li.appendChild(datesWrapper);
     li.appendChild(deleteBtn);
 
-    checkInput.onchange = () => completeTask(task.id, li);
+    li._taskId = task.id;
+    if (isCompleted) {
+      checkLabel.onclick = (e) => { e.preventDefault(); completeTask(task.id, li); };
+    } else {
+      checkLabel.querySelector('input').onchange = () => completeTask(task.id, li);
+    }
     deleteBtn.onclick = () => deleteTask(task.id, li);
     mediaSpan.onclick = () => openMediaPopup(task.id);
+    addSubBtn.onclick = (e) => { e.stopPropagation(); showSubtaskInput(task.id); };
 
     li.dataset.drumIdx = idx;
 
@@ -644,53 +597,114 @@ function renderTasks() {
 
 
   const taskCount = $('task-count');
-  if (taskCount) taskCount.textContent = `(${state.tasks.length})`;
+  if (taskCount) taskCount.textContent = `(${state.tasks.filter(t => !t.parent_id && !t.completed_at).length})`;
+
+  // Reschedule auto-scroll timer for next upcoming task
+  scheduleNextTaskScroll();
+}
+
+// ========== AUTO-SCROLL TO CURRENT TASK WHEN ITS TIME ARRIVES ==========
+let _nextTaskTimer = null;
+
+function scheduleNextTaskScroll() {
+  clearTimeout(_nextTaskTimer);
+  _nextTaskTimer = null;
+  const nowMs = Date.now();
+  let nearest = Infinity;
+  for (let i = 0; i < _drumList.length; i++) {
+    if (_drumList[i].type !== 'task') continue;
+    const s = _drumList[i].task.scheduled_start;
+    if (!s) continue;
+    const t = new Date(s).getTime();
+    if (t > nowMs && t < nearest) nearest = t;
+  }
+  if (nearest === Infinity) return;
+  // Add 500ms buffer so Date.now() is clearly past scheduled_start
+  const delay = nearest - nowMs + 500;
+  _nextTaskTimer = setTimeout(() => {
+    scrollToCurrentTask();
+    // Reschedule for the next upcoming task
+    scheduleNextTaskScroll();
+  }, delay);
 }
 
 // ========== DRAG-SCROLL FOR TASKS CAROUSEL ==========
 let _drumSnapRaf = 0;
 let _drumScrollTarget = null;
 let _drumNeedsReset = false;
+let _drumJumpToIdx = -1; // when >= 0, renderTasks will set scrollOffset so this drumList index is highlighted
 
 // Find the sorted index of the current/next task (closest to now)
-function findCurrentTaskIndex() {
-  const sorted = getSortedTasks();
-  const now = new Date().toISOString();
-  // Find the last task that already started (scheduled_start <= now)
-  let lastStarted = -1;
-  for (let i = sorted.length - 1; i >= 0; i--) {
-    if (sorted[i].scheduled_start && sorted[i].scheduled_start <= now) {
-      lastStarted = i;
-      break;
+// If _drumList is already built (called from renderTasks), reuse it
+function findCurrentTaskIndex(reuseList) {
+  if (!reuseList || _drumList.length === 0) {
+    const sorted = getSortedTasks();
+    _drumList = buildDrumList(sorted);
+  }
+  const nowMs = Date.now();
+  // Find task closest to now (past or future) using real timestamps
+  let bestIdx = -1;
+  let bestDist = Infinity;
+  for (let i = 0; i < _drumList.length; i++) {
+    if (_drumList[i].type !== 'task') continue;
+    const s = _drumList[i].task.scheduled_start;
+    if (!s) continue;
+    const dist = Math.abs(new Date(s).getTime() - nowMs);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestIdx = i;
     }
   }
-  if (lastStarted >= 0) return lastStarted;
-  // No started task — find first upcoming
-  for (let i = 0; i < sorted.length; i++) {
-    if (sorted[i].scheduled_start && sorted[i].scheduled_start >= now) return i;
+  if (bestIdx >= 0) return bestIdx;
+  // All tasks have no date — show first task
+  for (let i = 0; i < _drumList.length; i++) {
+    if (_drumList[i].type === 'task') return i;
   }
-  // All tasks have no date — show first
   return 0;
 }
 
-function scrollToCurrentTask(instant) {
-  const idx = findCurrentTaskIndex();
+// Skip header at highlight position, respecting scroll direction
+function skipHeaderAtHighlight(offset, highlightIdx, direction) {
+  const hi = offset + highlightIdx;
+  if (hi >= 0 && hi < _drumList.length && _drumList[hi].type === 'header') {
+    if (direction >= 0 && hi + 1 < _drumList.length) return offset + 1;
+    if (direction < 0 && hi - 1 >= 0) return offset - 1;
+    if (hi + 1 < _drumList.length) return offset + 1;
+    if (hi - 1 >= 0) return offset - 1;
+  }
+  return offset;
+}
+
+function adjustScrollAfterRemove() {
+  const sorted = getSortedTasks();
+  _drumList = buildDrumList(sorted);
+  if (_drumList.length === 0) return;
   const { highlightIdx } = getDrumParams();
+  const { min, max } = getDrumBounds(highlightIdx);
+  scrollOffset = Math.max(min, Math.min(max, scrollOffset));
+  scrollOffset = skipHeaderAtHighlight(scrollOffset, highlightIdx, 1);
+  drumFraction = 0;
+}
+
+function scrollToCurrentTask(instant) {
   if (instant) {
-    // Jump directly without animation
     cancelAnimationFrame(_drumSnapRaf);
     _drumScrollTarget = null;
-    scrollOffset = idx - highlightIdx;
+    _drumJumpToIdx = -2; // signal: find current task inside renderTasks
     drumFraction = 0;
     renderTasks();
   } else {
+    // For animated scroll, compute target here
+    const idx = findCurrentTaskIndex();
+    const { highlightIdx } = getDrumParams();
     scrollToTarget(idx - highlightIdx);
   }
 }
 
 function scrollToNewTask(id) {
   const sorted = getSortedTasks();
-  const idx = sorted.findIndex(t => t.id === id);
+  _drumList = buildDrumList(sorted);
+  const idx = _drumList.findIndex(e => e.type === 'task' && e.task.id === id);
   if (idx >= 0) {
     const { highlightIdx } = getDrumParams();
     scrollToTarget(idx - highlightIdx);
@@ -702,7 +716,9 @@ function scrollToTarget(target) {
   cancelAnimationFrame(_drumSnapRaf);
   const { highlightIdx } = getDrumParams();
   const { min, max } = getDrumBounds(highlightIdx);
-  _drumScrollTarget = Math.max(min, Math.min(max, target));
+  let clamped = Math.max(min, Math.min(max, target));
+  clamped = skipHeaderAtHighlight(clamped, highlightIdx, target >= scrollOffset ? 1 : -1);
+  _drumScrollTarget = Math.max(min, Math.min(max, clamped));
   if (_drumSnapAnimate) _drumSnapRaf = requestAnimationFrame(_drumSnapAnimate);
 }
 
@@ -745,26 +761,29 @@ function initTaskDrag() {
     // Determine direction on first significant movement
     if (!directionLocked && (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8)) {
       if (Math.abs(deltaX) > Math.abs(deltaY)) {
-        // Horizontal — release capture so swipe can work
+        // Horizontal — abort drum drag so tab swipe can work
         isDragging = false;
         directionLocked = false;
-        list.releasePointerCapture(e.pointerId);
+        try { list.releasePointerCapture(e.pointerId); } catch (_) {}
         document.removeEventListener('pointermove', onPointerMove);
         document.removeEventListener('pointerup', onPointerUp);
+        document.removeEventListener('pointercancel', onPointerCancel);
         list.classList.remove('dragging');
         clearTimeout(_listLongPressTimer);
         _listLongPressTimer = null;
         return;
       }
+      // Vertical confirmed — capture pointer now
       directionLocked = true;
+      try { list.setPointerCapture(e.pointerId); } catch (_) {}
     }
 
-    // Cancel long press if user starts dragging
-    if (_listLongPressTimer && Math.abs(deltaY) > 5) {
+    // Cancel long press if user starts dragging (generous threshold for touch)
+    if (_listLongPressTimer && (Math.abs(deltaY) > 15 || Math.abs(deltaX) > 15)) {
       clearTimeout(_listLongPressTimer);
       _listLongPressTimer = null;
     }
-    const rawOffset = startRawOffset + deltaY / ROW_PX;
+    const rawOffset = startRawOffset - deltaY / ROW_PX;
     scrollOffset = Math.round(rawOffset);
     drumFraction = rawOffset - scrollOffset;
     clampDrum();
@@ -798,6 +817,8 @@ function initTaskDrag() {
     // Simple fraction snap (after drag/wheel)
     if (Math.abs(drumFraction) < 0.005) {
       drumFraction = 0;
+      const { highlightIdx: hi2 } = getDrumParams();
+      scrollOffset = skipHeaderAtHighlight(scrollOffset, hi2, 1);
       drumTick();
       renderTasks();
       list.classList.remove('dragging');
@@ -809,12 +830,25 @@ function initTaskDrag() {
   }
   _drumSnapAnimate = snapAnimate;
 
+  function onPointerCancel() {
+    if (!isDragging) return;
+    isDragging = false;
+    clearTimeout(_listLongPressTimer);
+    _listLongPressTimer = null;
+    document.removeEventListener('pointermove', onPointerMove);
+    document.removeEventListener('pointerup', onPointerUp);
+    document.removeEventListener('pointercancel', onPointerCancel);
+    list.classList.remove('dragging');
+    _drumSnapRaf = requestAnimationFrame(snapAnimate);
+  }
+
   function onPointerUp(e) {
     if (!isDragging) return;
     isDragging = false;
     clearTimeout(_listLongPressTimer);
     document.removeEventListener('pointermove', onPointerMove);
     document.removeEventListener('pointerup', onPointerUp);
+    document.removeEventListener('pointercancel', onPointerCancel);
 
     // If long press already triggered edit, skip tap logic
     if (_listDidLongPress) {
@@ -910,9 +944,9 @@ function initTaskDrag() {
     // Include leftover fraction so re-grab mid-snap feels continuous
     startRawOffset = scrollOffset + drumFraction;
     list.classList.add('dragging');
-    list.setPointerCapture(e.pointerId);
     document.addEventListener('pointermove', onPointerMove);
     document.addEventListener('pointerup', onPointerUp);
+    document.addEventListener('pointercancel', onPointerCancel);
   });
 
   // Keyboard arrows
@@ -924,7 +958,9 @@ function initTaskDrag() {
     _drumScrollTarget = null;
     const { highlightIdx } = getDrumParams();
     const { min, max } = getDrumBounds(highlightIdx);
-    const next = scrollOffset + direction;
+    let next = scrollOffset + direction;
+    if (next < min || next > max) return;
+    next = skipHeaderAtHighlight(next, highlightIdx, direction);
     if (next < min || next > max) return;
     scrollOffset = next;
     drumTick();
@@ -949,7 +985,7 @@ function initTaskDrag() {
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
     e.preventDefault();
     if (e.repeat) return; // ignore native repeat, we handle our own
-    const dir = e.key === 'ArrowUp' ? 1 : -1;
+    const dir = e.key === 'ArrowUp' ? -1 : 1;
     drumArrowStep(dir);
     resetIdleTimer();
     stopKeyRepeat();
@@ -976,9 +1012,11 @@ function initTaskDrag() {
     _drumScrollTarget = null;
     const { highlightIdx } = getDrumParams();
     const { min, max } = getDrumBounds(highlightIdx);
-    const delta = e.deltaY > 0 ? -1 : 1;
-    const next = scrollOffset + delta;
+    const delta = e.deltaY > 0 ? 1 : -1;
+    let next = scrollOffset + delta;
     if (next < min || next > max) return; // at boundary — stop
+    next = skipHeaderAtHighlight(next, highlightIdx, delta);
+    if (next < min || next > max) return;
     scrollOffset = next;
     drumTick();
     drumFraction = -delta * 0.4; // start with visual offset for smooth feel
@@ -1033,10 +1071,6 @@ function showPopup(type, data) {
 }
 
 // ========== TASK ACTIONS ==========
-let pendingTasks = new Set();
-let pendingCompletes = new Set();
-let pendingDeletes = new Set();
-let pendingEdits = new Set();
 
 async function addTask(text) {
   if (!text.trim()) return;
@@ -1054,19 +1088,10 @@ async function addTask(text) {
   });
 
   if (result && result.id) {
-    // Mark as pending to avoid duplicate from WebSocket
-    pendingTasks.add(result.id);
-
-    // If WebSocket already added this task — just scroll to it
-    if (state.tasks.find(t => t.id === result.id)) {
-      scrollToNewTask(result.id);
-      setTimeout(() => pendingTasks.delete(result.id), 3000);
-      return;
-    }
-
     state.tasks.unshift({
       id: result.id, text: result.text, xp: result.xp,
-      scheduled_start: result.scheduled_start, scheduled_end: result.scheduled_end
+      scheduled_start: result.scheduled_start, scheduled_end: result.scheduled_end,
+      completed_at: null, parent_id: null
     });
 
     // +3 XP for creating a task
@@ -1088,14 +1113,109 @@ async function addTask(text) {
     const schedFields = $('schedule-fields');
     if (schedFields) schedFields.style.display = 'none';
     $('schedule-toggle')?.classList.remove('active');
+  }
+}
 
-    // Clear pending after short delay
-    setTimeout(() => pendingTasks.delete(result.id), 3000);
+let _subtaskInputParentId = null;
+
+async function showSubtaskInput(parentId) {
+  const parent = state.tasks.find(t => t.id === parentId);
+  if (!parent) return;
+
+  const body = {
+    text: '...',
+    parent_id: parentId,
+    scheduled_start: parent.scheduled_start || new Date().toISOString(),
+    scheduled_end: parent.scheduled_end || new Date().toISOString()
+  };
+
+  const result = await api('/api/tasks', {
+    method: 'POST',
+    body: JSON.stringify(body)
+  });
+
+  if (result && result.id) {
+    state.tasks.push({
+      id: result.id, text: result.text, xp: result.xp,
+      scheduled_start: result.scheduled_start, scheduled_end: result.scheduled_end,
+      completed_at: null, parent_id: result.parent_id
+    });
+
+    if (result.xpEarned) {
+      state.level = result.level;
+      state.xp = result.currentXp;
+      state.xpMax = result.xpMax;
+      if (result.leveledUp) showPopup('levelup');
+    }
+
+    renderTasks();
+    updateUI();
+    playSound('add');
+
+    // Auto-enter edit mode on the new subtask's text
+    requestAnimationFrame(() => {
+      const allItems = document.querySelectorAll('.task-item');
+      for (const li of allItems) {
+        if (li._taskId === result.id) {
+          const textSpan = li.querySelector('.task-text');
+          if (textSpan && textSpan._enterEdit) textSpan._enterEdit();
+          break;
+        }
+      }
+    });
+  }
+}
+
+function _applyDoneVisual(el, done) {
+  const checkLabel = el.querySelector('.task-checkbox');
+  if (!checkLabel) return;
+  // Clear children safely
+  while (checkLabel.firstChild) checkLabel.removeChild(checkLabel.firstChild);
+  if (done) {
+    el.classList.add('task-done');
+    checkLabel.classList.add('task-completed-icon');
+    const span = document.createElement('span');
+    span.className = 'checkbox-completed';
+    span.textContent = '\u2705';
+    checkLabel.appendChild(span);
+    checkLabel.onclick = (e) => { e.preventDefault(); completeTask(el._taskId, el); };
+  } else {
+    el.classList.remove('task-done');
+    checkLabel.classList.remove('task-completed-icon');
+    checkLabel.onclick = null;
+    const inp = document.createElement('input');
+    inp.type = 'checkbox';
+    inp.setAttribute('aria-label', 'Complete quest');
+    const custom = document.createElement('span');
+    custom.className = 'checkbox-custom';
+    checkLabel.appendChild(inp);
+    checkLabel.appendChild(custom);
+    inp.onchange = () => completeTask(el._taskId, el);
   }
 }
 
 async function completeTask(id, el) {
-  el.classList.add('completing');
+  const task = state.tasks.find(t => t.id === id);
+  if (!task) return;
+
+  // Toggle: if already completed, uncomplete it
+  if (task.completed_at) {
+    task.completed_at = null;
+    _applyDoneVisual(el, false);
+    updateUI();
+    const result = await api(`/api/tasks/${id}/uncomplete`, { method: 'POST' });
+    if (result && result.success) {
+      Object.assign(state, { completed: result.completed, level: result.level, xp: result.xp, xpMax: result.xpMax });
+      updateUI();
+    } else {
+      task.completed_at = new Date().toISOString();
+      _applyDoneVisual(el, true);
+      updateUI();
+    }
+    return;
+  }
+
+  // Complete task
   const r = el.getBoundingClientRect();
   particles(r.left + r.width / 2, r.top + r.height / 2);
   playSound('complete');
@@ -1103,26 +1223,19 @@ async function completeTask(id, el) {
   // Reset combo timer
   clearTimeout(comboTimer);
 
-  pendingCompletes.add(id);
+  // Optimistic: mark as completed visually in-place
+  task.completed_at = new Date().toISOString();
+  _applyDoneVisual(el, true);
+  updateUI();
 
-  // Optimistic: remove task from UI after animation
-  const taskIdx = state.tasks.findIndex(t => t.id === id);
-  const savedTask = taskIdx >= 0 ? state.tasks[taskIdx] : null;
-
-  setTimeout(() => {
-    state.tasks = state.tasks.filter(t => t.id !== id);
-    renderTasks();
-    updateUI();
-  }, TASK_COMPLETE_ANIMATION_MS);
-
-  // Send request in parallel
+  // Send request
   const result = await api(`/api/tasks/${id}/complete`, {
     method: 'POST',
     body: JSON.stringify({ combo: state.combo })
   });
 
   if (result && result.success) {
-    setTimeout(() => pendingCompletes.delete(id), 3000);
+    task.completed_at = result.completed_at;
     Object.assign(state, { level: result.level, xp: result.xp, xpMax: result.xpMax, completed: result.completed, streak: result.streak, combo: result.combo });
 
     const newAch = result.newAchievements || [];
@@ -1139,27 +1252,24 @@ async function completeTask(id, el) {
     renderAchievements();
     updateUI();
   } else {
-    // Rollback: restore task if request failed
-    pendingCompletes.delete(id);
-    if (savedTask) {
-      state.tasks.splice(taskIdx, 0, savedTask);
-      renderTasks();
-      updateUI();
-    }
+    // Rollback
+    task.completed_at = null;
+    _applyDoneVisual(el, false);
+    updateUI();
   }
 }
 
 async function deleteTask(id, el) {
-  pendingDeletes.add(id);
   el.style.animation = 'task-enter 0.3s ease reverse';
   playSound('delete');
 
   await api(`/api/tasks/${id}`, { method: 'DELETE' });
 
   setTimeout(() => {
-    state.tasks = state.tasks.filter(t => t.id !== id);
+    if (_subtaskInputParentId === id) _subtaskInputParentId = null;
+    state.tasks = state.tasks.filter(t => t.id !== id && t.parent_id !== id);
+    adjustScrollAfterRemove();
     renderTasks();
-    setTimeout(() => pendingDeletes.delete(id), 3000);
   }, TASK_DELETE_ANIMATION_MS);
 }
 
@@ -1171,7 +1281,6 @@ async function editTask(id, newText) {
     return;
   }
 
-  pendingEdits.add(id);
   await api(`/api/tasks/${id}`, {
     method: 'PUT',
     body: JSON.stringify({ text })
@@ -1179,7 +1288,6 @@ async function editTask(id, newText) {
 
   const task = state.tasks.find(t => t.id === id);
   if (task) task.text = text;
-  setTimeout(() => pendingEdits.delete(id), 3000);
 }
 
 // ========== AUTO-RESIZE TEXTAREA ==========
@@ -1311,6 +1419,7 @@ async function toggleSetting(key, transform = v => !v) {
   updateUI();
   if (state.sound) playSound('add');
 }
+$('settings-btn').onclick = (e) => { e.stopPropagation(); $('settings-btn').closest('.settings-item-wrapper').classList.toggle('open'); };
 $('sound-toggle').onclick = () => toggleSetting('sound');
 $('version-btn').onclick = () => alert('Coming soon!');
 
@@ -1319,8 +1428,8 @@ $('version-btn').onclick = () => alert('Coming soon!');
 // ========== SETTINGS DROPDOWN ==========
 const [sToggle, sDrop] = [$('settings-toggle'), $('settings-dropdown')];
 sToggle.onclick = e => { e.stopPropagation(); sDrop.classList.toggle('show'); };
-document.addEventListener('click', e => { if (!sDrop.contains(e.target) && !sToggle.contains(e.target)) sDrop.classList.remove('show'); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') sDrop.classList.remove('show'); });
+document.addEventListener('click', e => { if (!sDrop.contains(e.target) && !sToggle.contains(e.target)) { sDrop.classList.remove('show'); document.querySelectorAll('.settings-item-wrapper.open').forEach(el => el.classList.remove('open')); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { sDrop.classList.remove('show'); document.querySelectorAll('.settings-item-wrapper.open').forEach(el => el.classList.remove('open')); } });
 
 // ========== TABS ==========
 const TAB_ORDER = ['todo', 'social', 'history', 'achievements'];
@@ -2159,10 +2268,13 @@ initTabs();
 initTaskDrag();
 initSearch();
 
-// Re-render drum on resize to adjust row count
+// Re-render drum on resize to adjust row count, preserving highlighted item
 window.addEventListener('resize', () => {
   if (_tabAnimating) return;
   if ($('tasks-list')?.classList.contains('editing')) return;
+  // Preserve highlighted item across resize by letting renderTasks recompute offset
+  const { highlightIdx: oldHi } = getDrumParams();
+  _drumJumpToIdx = scrollOffset + oldHi; // current highlighted drumList index
   renderTasks();
 });
 
@@ -2184,8 +2296,6 @@ resetIdleTimer();
 
 // Load state from server
 loadState().then(async () => {
-  // Connect to WebSocket after initial load
-  connectWebSocket();
   // Check Google Calendar connection
   checkGoogleCalendarStatus();
 
@@ -2207,7 +2317,7 @@ loadState().then(async () => {
 
 // ========== AUTO-REFRESH ==========
 
-// Refresh state when tab becomes visible (covers both visibilitychange and focus)
+// Refresh state when tab becomes visible
 let _lastRefreshAt = 0;
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
@@ -2218,18 +2328,13 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// Periodic background refresh (every 60 seconds)
-// Only used as fallback when WebSocket is not available
+// Periodic background refresh
 let refreshTimer = null;
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(() => {
-    // Only refresh if tab is visible and WebSocket is not connected
-    if (!document.hidden && (!socket || socket.readyState !== WebSocket.OPEN)) {
-      console.log('Auto-refreshing data (WebSocket not available)...');
-      loadState();
-    }
-  }, 60000); // 60 seconds
+    if (!document.hidden) loadState();
+  }, POLL_INTERVAL_MS);
 }
 
 // Start auto-refresh
@@ -2268,12 +2373,8 @@ function startDevPoll() {
 }
 startDevPoll();
 
-// Stop auto-refresh and WebSocket on page unload
+// Stop auto-refresh on page unload
 window.addEventListener('beforeunload', () => {
   if (refreshTimer) clearInterval(refreshTimer);
   if (_devPollTimer) clearInterval(_devPollTimer);
-  if (socket) {
-    socket.close();
-    console.log('WebSocket connection closed');
-  }
 });

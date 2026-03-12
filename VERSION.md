@@ -28,8 +28,9 @@ python run.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.33 - test 2"
+git commit -m "v0.0.54 - added 5 sub tasks"
 git push
+python run.py
 
 # DEV LOG
 v0.0.40 - server test 6
@@ -45,3 +46,5 @@ v0.0.49 - added keyboard swiping pages right and left
 v0.0.50 - new screenshots
 v0.0.51 - added enddless keyboard totation of tabs
 v0.0.52 - code refactoring
+v0.0.53 - mobile design
+v0.0.54 - added 5 sub tasks

@@ -1,7 +1,8 @@
 """Google Calendar API helper functions for ToDo-Game integration."""
 
 import logging
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timezone, timedelta
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -97,7 +98,10 @@ def delete_calendar_event(service, calendar_id, event_id):
     try:
         service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
         return True
-    except Exception:
+    except Exception as e:
+        if '410' in str(e) or '404' in str(e):
+            logger.info('Calendar event %s already deleted, skipping', event_id)
+            return True
         logger.error('Failed to delete calendar event %s', event_id, exc_info=True)
         return False
 
@@ -118,8 +122,8 @@ def sync_calendar_events(service, calendar_id, sync_token=None):
             if sync_token and not is_full_sync:
                 kwargs['syncToken'] = sync_token
             else:
-                # Full sync: only get recent events
-                kwargs['timeMin'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+                # Full sync: get events from 30 days ago onward
+                kwargs['timeMin'] = (datetime.now(timezone.utc) - timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%SZ')
             if page_token:
                 kwargs['pageToken'] = page_token
 
@@ -131,6 +135,9 @@ def sync_calendar_events(service, calendar_id, sync_token=None):
                 break
 
     except Exception as e:
+        from google.auth.exceptions import RefreshError
+        if isinstance(e, RefreshError):
+            raise  # Let caller handle expired/revoked tokens
         error_str = str(e)
         if '410' in error_str or 'Gone' in error_str:
             # syncToken invalidated, do full sync
@@ -154,3 +161,34 @@ def parse_event_times(event):
 def strip_prefix(summary):
     """Return event summary as-is (kept for API compatibility)."""
     return summary or ''
+
+
+def watch_calendar(service, calendar_id, webhook_url):
+    """Register a push notification channel for calendar events.
+
+    Returns (channel_id, resource_id, expiration_ms) or None on failure.
+    The channel expires in ~7 days (Google maximum).
+    """
+    channel_id = str(uuid.uuid4())
+    # Request expiration slightly under 7 days to renew before it lapses
+    expiration = int((datetime.now(timezone.utc) + timedelta(days=6, hours=23)).timestamp() * 1000)
+    body = {
+        'id': channel_id,
+        'type': 'web_hook',
+        'address': webhook_url,
+        'expiration': expiration,
+    }
+    try:
+        result = service.events().watch(calendarId=calendar_id, body=body).execute()
+        return result['id'], result['resourceId'], int(result.get('expiration', expiration))
+    except Exception:
+        logger.error('Failed to register calendar watch', exc_info=True)
+        return None
+
+
+def stop_watch(service, channel_id, resource_id):
+    """Stop an existing push notification channel."""
+    try:
+        service.channels().stop(body={'id': channel_id, 'resourceId': resource_id}).execute()
+    except Exception:
+        logger.error('Failed to stop calendar watch channel %s', channel_id, exc_info=True)

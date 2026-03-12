@@ -1,10 +1,9 @@
 import os, math, uuid, random, hashlib, hmac, subprocess, sqlite3, logging, json, asyncio
 import warnings
 from datetime import datetime, date
-from typing import Optional
 from contextlib import contextmanager
 
-from fastapi import FastAPI, Request, Response, Form, UploadFile, File, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, Response, Form, UploadFile, File, Depends, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -14,7 +13,7 @@ from dotenv import load_dotenv
 import bcrypt
 from itsdangerous import URLSafeTimedSerializer
 import uvicorn
-from SETTINGS import APP_DEBUG, PORT, BRANCH as DEFAULT_BRANCH, GOOGLE_CALENDAR_SYNC_INTERVAL, DRUM_ROW_HEIGHT, DRUM_MAX_TOP_ANGLE, DRUM_PERSPECTIVE_K, DRUM_HIGHLIGHT_OFFSET
+from SETTINGS import APP_DEBUG, PORT, BRANCH as DEFAULT_BRANCH, GOOGLE_CALENDAR_SYNC_INTERVAL, DRUM_ROW_HEIGHT, DRUM_MAX_TOP_ANGLE, DRUM_PERSPECTIVE_K, DRUM_HIGHLIGHT_OFFSET, INSTANCE_ROLE as DEFAULT_INSTANCE_ROLE
 
 # Suppress all dependency warnings
 warnings.filterwarnings('ignore')
@@ -65,6 +64,8 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI", "")
 GOOGLE_CALENDAR_ENABLED = bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+APP_URL = os.environ.get("APP_URL", "")  # Public HTTPS URL for Google Calendar webhooks
+INSTANCE_ROLE = os.environ.get("INSTANCE_ROLE", DEFAULT_INSTANCE_ROLE)  # "primary" or "replica"
 
 # Media uploads configuration
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'DATA', 'UPLOADS')
@@ -104,56 +105,6 @@ ACHIEVEMENTS = [
     {'id': 'streak30', 'check': lambda s: s['streak'] >= 30},
 ]
 
-# ============== WebSocket Manager ==============
-
-class ConnectionManager:
-    def __init__(self):
-        self.user_connections: dict[int, dict[str, WebSocket]] = {}
-
-    async def connect(self, user_id: int, session_id: str, ws: WebSocket):
-        await ws.accept()
-        self.user_connections.setdefault(user_id, {})[session_id] = ws
-
-    def disconnect(self, user_id: int, session_id: str):
-        if user_id in self.user_connections:
-            self.user_connections[user_id].pop(session_id, None)
-            if not self.user_connections[user_id]:
-                del self.user_connections[user_id]
-
-    async def broadcast(self, user_id: int, event: str, data: dict, source_sid: Optional[str] = None):
-        if user_id not in self.user_connections:
-            return
-        dead = []
-        for sid, ws in list(self.user_connections[user_id].items()):
-            if sid == source_sid:
-                continue
-            try:
-                await ws.send_json({"event": event, "data": data})
-            except Exception:
-                dead.append(sid)
-        for sid in dead:
-            self.user_connections[user_id].pop(sid, None)
-
-    async def broadcast_all(self, event: str, data: dict):
-        dead_users = []
-        for user_id in list(self.user_connections.keys()):
-            dead = []
-            for sid, ws in list(self.user_connections[user_id].items()):
-                try:
-                    await ws.send_json({"event": event, "data": data})
-                except Exception:
-                    dead.append(sid)
-            for sid in dead:
-                self.user_connections[user_id].pop(sid, None)
-            if not self.user_connections[user_id]:
-                dead_users.append(user_id)
-        for user_id in dead_users:
-            del self.user_connections[user_id]
-
-manager = ConnectionManager()
-
-async def send_user_event(user_id: int, event_type: str, data: dict, source_session_id: Optional[str] = None):
-    await manager.broadcast(user_id, event_type, data, source_session_id)
 
 # ============== File Hash (debug mode only) ==============
 
@@ -253,7 +204,7 @@ def init_db():
         # Google Calendar migration: add schedule columns to tasks
         cursor = conn.execute("PRAGMA table_info(tasks)")
         existing_cols = {row[1] for row in cursor.fetchall()}
-        for col in ['scheduled_start', 'scheduled_end', 'google_event_id']:
+        for col in ['scheduled_start', 'scheduled_end', 'google_event_id', 'completed_at', 'parent_id']:
             if col not in existing_cols:
                 conn.execute(f'ALTER TABLE tasks ADD COLUMN {col} TEXT')
 
@@ -269,6 +220,19 @@ def init_db():
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE);
             CREATE INDEX IF NOT EXISTS idx_tasks_google_event ON tasks(google_event_id);
         ''')
+
+        # Google Calendar push notifications: add watch columns
+        gt_cursor = conn.execute("PRAGMA table_info(google_tokens)")
+        gt_cols = {row[1] for row in gt_cursor.fetchall()}
+        for col in ['watch_channel_id', 'watch_resource_id', 'watch_expiration']:
+            if col not in gt_cols:
+                conn.execute(f'ALTER TABLE google_tokens ADD COLUMN {col} TEXT')
+
+        # Migrate activity_log: add task_id column
+        al_cursor = conn.execute("PRAGMA table_info(activity_log)")
+        al_cols = {row[1] for row in al_cursor.fetchall()}
+        if 'task_id' not in al_cols:
+            conn.execute('ALTER TABLE activity_log ADD COLUMN task_id TEXT')
 
         # Backfill: set scheduled_start/end to created_at where missing
         conn.execute("UPDATE tasks SET scheduled_start = created_at WHERE scheduled_start IS NULL")
@@ -590,8 +554,9 @@ async def api_get_state(user_id: int = Depends(get_authenticated_user)):
         media_map = {m['task_id']: {'type': m['media_type'], 'url': f"/UPLOADS/{m['filename']}"}
                      for m in conn.execute('SELECT task_id, media_type, filename FROM task_media WHERE user_id = ?', (user_id,))}
         tasks = [{'id': t['id'], 'text': t['text'], 'xp': t['xp_reward'], 'media': media_map.get(t['id']),
-                  'scheduled_start': t['scheduled_start'], 'scheduled_end': t['scheduled_end']}
-                 for t in conn.execute('SELECT id, text, xp_reward, scheduled_start, scheduled_end FROM tasks WHERE user_id = ? ORDER BY created_at DESC', (user_id,))]
+                  'scheduled_start': t['scheduled_start'], 'scheduled_end': t['scheduled_end'],
+                  'completed_at': t['completed_at'], 'parent_id': t['parent_id']}
+                 for t in conn.execute('SELECT id, text, xp_reward, scheduled_start, scheduled_end, completed_at, parent_id FROM tasks WHERE user_id = ? ORDER BY created_at DESC', (user_id,))]
         achievements = {a['achievement_id']: True for a in conn.execute('SELECT achievement_id FROM user_achievements WHERE user_id = ?', (user_id,))}
         return JSONResponse({
             'tasks': tasks, 'level': progress['level'], 'xp': progress['xp'], 'xpMax': progress['xp_max'],
@@ -616,11 +581,18 @@ async def api_create_task(request: Request, user_id: int = Depends(get_authentic
     task_id, xp = _new_task_id()
     scheduled_start = data.get('scheduled_start') or None
     scheduled_end = data.get('scheduled_end') or None
+    parent_id = data.get('parent_id') or None
 
     google_event_id = None
     with get_db() as conn:
-        conn.execute('INSERT INTO tasks (id, user_id, text, xp_reward, scheduled_start, scheduled_end) VALUES (?, ?, ?, ?, ?, ?)',
-                     (task_id, user_id, text, xp, scheduled_start, scheduled_end))
+        # Validate parent exists if provided
+        if parent_id:
+            parent = conn.execute('SELECT id FROM tasks WHERE id = ? AND user_id = ?', (parent_id, user_id)).fetchone()
+            if not parent:
+                return error_response('Parent task not found', 404)
+
+        conn.execute('INSERT INTO tasks (id, user_id, text, xp_reward, scheduled_start, scheduled_end, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                     (task_id, user_id, text, xp, scheduled_start, scheduled_end, parent_id))
         progress = get_or_create_progress(conn, user_id)
         new_xp, new_level, new_xp_max, leveled_up = apply_xp(progress, 3)
         conn.execute('UPDATE user_progress SET xp=?, level=?, xp_max=? WHERE user_id=?',
@@ -644,15 +616,10 @@ async def api_create_task(request: Request, user_id: int = Depends(get_authentic
 
         conn.commit()
 
-    await send_user_event(user_id, 'task_created', {
-        'id': task_id, 'text': text, 'xp': xp,
-        'scheduled_start': scheduled_start, 'scheduled_end': scheduled_end,
-        'xpEarned': 3, 'level': new_level, 'currentXp': new_xp, 'xpMax': new_xp_max, 'leveledUp': leveled_up
-    })
-
     return JSONResponse({
         'id': task_id, 'text': text, 'xp': xp,
         'scheduled_start': scheduled_start, 'scheduled_end': scheduled_end,
+        'parent_id': parent_id,
         'xpEarned': 3, 'level': new_level, 'currentXp': new_xp, 'xpMax': new_xp_max, 'leveledUp': leveled_up
     })
 
@@ -696,7 +663,6 @@ async def api_update_task(task_id: str, request: Request, user_id: int = Depends
         event_data['scheduled_start'] = scheduled_start or None
     if scheduled_end is not None:
         event_data['scheduled_end'] = scheduled_end or None
-    await send_user_event(user_id, 'task_updated', event_data)
     return JSONResponse({'success': True})
 
 @app.delete('/api/tasks/{task_id}')
@@ -714,10 +680,11 @@ async def api_delete_task(task_id: str, user_id: int = Depends(get_authenticated
                 except Exception:
                     logger.error('Failed to sync task deletion to Google Calendar', exc_info=True)
 
+        # Delete subtasks first, then the task itself
+        conn.execute('DELETE FROM tasks WHERE parent_id = ? AND user_id = ?', (task_id, user_id))
         conn.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id))
         conn.commit()
 
-    await send_user_event(user_id, 'task_deleted', {'id': task_id})
     return JSONResponse({'success': True})
 
 @app.post('/api/tasks/{task_id}/complete')
@@ -726,6 +693,8 @@ async def api_complete_task(task_id: str, request: Request, user_id: int = Depen
         task = conn.execute('SELECT * FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
         if not task:
             return error_response('Task not found', 404)
+        if task['completed_at']:
+            return error_response('Task already completed', 400)
 
         data = await _parse_json(request)
         r = _complete_task_logic(conn, user_id, task, data.get('combo', 0))
@@ -733,8 +702,8 @@ async def api_complete_task(task_id: str, request: Request, user_id: int = Depen
         # Log activity
         media = conn.execute('SELECT media_type, filename FROM task_media WHERE task_id = ?', (task_id,)).fetchone()
         extra_data = json.dumps({'media_type': media['media_type'], 'media_url': f"/UPLOADS/{media['filename']}"}) if media else None
-        conn.execute('''INSERT INTO activity_log (user_id, activity_type, task_text, xp_earned, extra_data)
-                        VALUES (?, 'task_completed', ?, ?, ?)''', (user_id, task['text'], r['xp_earned'], extra_data))
+        conn.execute('''INSERT INTO activity_log (user_id, activity_type, task_text, xp_earned, extra_data, task_id)
+                        VALUES (?, 'task_completed', ?, ?, ?, ?)''', (user_id, task['text'], r['xp_earned'], extra_data, task_id))
 
         # Delete Google Calendar event on completion
         if GOOGLE_CALENDAR_ENABLED and task['google_event_id']:
@@ -746,19 +715,64 @@ async def api_complete_task(task_id: str, request: Request, user_id: int = Depen
             except Exception:
                 logger.error('Failed to delete calendar event on task completion', exc_info=True)
 
-        conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
+        completed_at = datetime.utcnow().isoformat()
+        conn.execute('UPDATE tasks SET completed_at = ? WHERE id = ?', (completed_at, task_id))
         conn.commit()
-
-    await send_user_event(user_id, 'task_completed', {
-        'id': task_id, 'xpEarned': r['xp_earned'], 'level': r['level'], 'xp': r['xp'], 'xpMax': r['xp_max'],
-        'completed': r['completed'], 'streak': r['streak'], 'combo': r['combo'],
-        'leveledUp': r['leveled_up'], 'newAchievements': r['new_achievements']
-    })
 
     return JSONResponse({
         'success': True, 'xpEarned': r['xp_earned'], 'level': r['level'], 'xp': r['xp'], 'xpMax': r['xp_max'],
         'completed': r['completed'], 'streak': r['streak'], 'combo': r['combo'],
-        'leveledUp': r['leveled_up'], 'newAchievements': r['new_achievements']
+        'leveledUp': r['leveled_up'], 'newAchievements': r['new_achievements'],
+        'completed_at': completed_at
+    })
+
+@app.post('/api/tasks/{task_id}/uncomplete')
+async def api_uncomplete_task(task_id: str, request: Request, user_id: int = Depends(get_authenticated_user)):
+    with get_db() as conn:
+        task = conn.execute('SELECT * FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
+        if not task:
+            return error_response('Task not found', 404)
+        if not task['completed_at']:
+            return error_response('Task is not completed', 400)
+
+        # Find XP earned from activity_log for this task completion
+        log_entry = conn.execute(
+            '''SELECT id, xp_earned FROM activity_log
+               WHERE user_id = ? AND activity_type = 'task_completed' AND task_id = ?
+               ORDER BY created_at DESC LIMIT 1''',
+            (user_id, task_id)).fetchone()
+        xp_to_remove = log_entry['xp_earned'] if log_entry else task['xp_reward']
+
+        # Remove the activity log entry
+        if log_entry:
+            conn.execute('DELETE FROM activity_log WHERE id = ?', (log_entry['id'],))
+
+        # Reverse XP and completed count
+        progress = get_or_create_progress(conn, user_id)
+        new_completed = max(0, progress['completed_tasks'] - 1)
+        new_xp = progress['xp'] - xp_to_remove
+        new_level = progress['level']
+        new_xp_max = progress['xp_max']
+
+        # Handle level down if XP goes negative
+        while new_xp < 0 and new_level > 1:
+            new_level -= 1
+            new_xp_max = int(100 * math.pow(1.2, new_level - 1))
+            new_xp += new_xp_max
+        new_xp = max(0, new_xp)
+        if new_level <= 1:
+            new_xp_max = 100
+
+        conn.execute('''UPDATE user_progress SET level=?, xp=?, xp_max=?, completed_tasks=? WHERE user_id=?''',
+                     (new_level, new_xp, new_xp_max, new_completed, user_id))
+
+        conn.execute('UPDATE tasks SET completed_at = NULL WHERE id = ?', (task_id,))
+        conn.commit()
+
+        progress = get_or_create_progress(conn, user_id)
+    return JSONResponse({
+        'success': True, 'completed': progress['completed_tasks'],
+        'level': progress['level'], 'xp': progress['xp'], 'xpMax': progress['xp_max']
     })
 
 @app.get('/api/history')
@@ -787,12 +801,13 @@ async def api_reset_combo(user_id: int = Depends(get_authenticated_user)):
 async def bot_get_tasks(user_id: int = Depends(get_token_authenticated_user)):
     with get_db() as conn:
         tasks = conn.execute(
-            'SELECT id, text, xp_reward FROM tasks WHERE user_id = ? ORDER BY created_at DESC',
+            'SELECT id, text, xp_reward, completed_at, parent_id FROM tasks WHERE user_id = ? ORDER BY created_at DESC',
             (user_id,)
         ).fetchall()
         return JSONResponse({
             'success': True,
-            'tasks': [{'id': t['id'], 'text': t['text'], 'xp': t['xp_reward']} for t in tasks]
+            'tasks': [{'id': t['id'], 'text': t['text'], 'xp': t['xp_reward'],
+                        'completed_at': t['completed_at'], 'parent_id': t['parent_id']} for t in tasks]
         })
 
 @app.post('/api/bot/tasks/add')
@@ -812,11 +827,6 @@ async def bot_add_task(request: Request, user_id: int = Depends(get_token_authen
                      (new_xp, new_level, new_xp_max, user_id))
         conn.commit()
 
-    await send_user_event(user_id, 'task_created', {
-        'id': task_id, 'text': text, 'xp': xp,
-        'xpEarned': 3, 'level': new_level, 'currentXp': new_xp, 'xpMax': new_xp_max, 'leveledUp': leveled_up
-    })
-
     return JSONResponse({
         'success': True,
         'task': {'id': task_id, 'text': text, 'xp': xp},
@@ -829,16 +839,13 @@ async def bot_complete_task(task_id: str, request: Request, user_id: int = Depen
         task = conn.execute('SELECT * FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
         if not task:
             return JSONResponse({'success': False, 'error': 'Task not found'}, status_code=404)
+        if task['completed_at']:
+            return JSONResponse({'success': False, 'error': 'Task already completed'}, status_code=400)
 
         r = _complete_task_logic(conn, user_id, task)
-        conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
+        completed_at = datetime.utcnow().isoformat()
+        conn.execute('UPDATE tasks SET completed_at = ? WHERE id = ?', (completed_at, task_id))
         conn.commit()
-
-    await send_user_event(user_id, 'task_completed', {
-        'id': task_id, 'xpEarned': r['xp_earned'], 'level': r['level'], 'xp': r['xp'], 'xpMax': r['xp_max'],
-        'completed': r['completed'], 'streak': r['streak'], 'combo': r['combo'],
-        'leveledUp': r['leveled_up'], 'newAchievements': r['new_achievements']
-    })
 
     return JSONResponse({
         'success': True, 'xpEarned': r['xp_earned'], 'level': r['level'], 'leveledUp': r['leveled_up']
@@ -850,7 +857,6 @@ async def bot_delete_task(task_id: str, user_id: int = Depends(get_token_authent
         conn.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id))
         conn.commit()
 
-    await send_user_event(user_id, 'task_deleted', {'id': task_id})
     return JSONResponse({'success': True})
 
 @app.post('/api/bot/tasks/{task_id}/rename')
@@ -863,7 +869,6 @@ async def bot_rename_task(task_id: str, request: Request, user_id: int = Depends
         conn.execute('UPDATE tasks SET text = ? WHERE id = ? AND user_id = ?', (text, task_id, user_id))
         conn.commit()
 
-    await send_user_event(user_id, 'task_updated', {'id': task_id, 'text': text})
     return JSONResponse({'success': True})
 
 # ============== Media API ==============
@@ -1215,6 +1220,19 @@ async def google_callback(request: Request):
 @app.post('/api/google/disconnect')
 async def google_disconnect(user_id: int = Depends(get_authenticated_user)):
     with get_db() as conn:
+        row = conn.execute(
+            'SELECT watch_channel_id, watch_resource_id FROM google_tokens WHERE user_id = ?', (user_id,)
+        ).fetchone()
+        # Stop watch channel if active
+        if row and row['watch_channel_id'] and row['watch_resource_id']:
+            try:
+                from BACKEND.google_calendar import get_google_credentials, get_calendar_service, stop_watch
+                creds = get_google_credentials(conn, user_id, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
+                if creds:
+                    service = get_calendar_service(creds)
+                    stop_watch(service, row['watch_channel_id'], row['watch_resource_id'])
+            except Exception:
+                logger.error('Failed to stop watch on disconnect for user %d', user_id, exc_info=True)
         conn.execute('DELETE FROM google_tokens WHERE user_id = ?', (user_id,))
         conn.execute('UPDATE tasks SET google_event_id = NULL WHERE user_id = ?', (user_id,))
         conn.commit()
@@ -1226,34 +1244,21 @@ async def google_status(user_id: int = Depends(get_authenticated_user)):
         return JSONResponse({'connected': False, 'available': False})
     with get_db() as conn:
         row = conn.execute('SELECT user_id FROM google_tokens WHERE user_id = ?', (user_id,)).fetchone()
-    return JSONResponse({'connected': row is not None, 'available': True})
+        if not row:
+            return JSONResponse({'connected': False, 'available': True})
+        # Validate that the stored token is still usable
+        try:
+            from BACKEND.google_calendar import get_google_credentials
+            creds = get_google_credentials(conn, user_id, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
+            if not creds or not creds.valid:
+                raise Exception('invalid credentials')
+        except Exception:
+            conn.execute('DELETE FROM google_tokens WHERE user_id = ?', (user_id,))
+            conn.commit()
+            logger.warning('Removed expired Google tokens for user %s', user_id)
+            return JSONResponse({'connected': False, 'available': True})
+    return JSONResponse({'connected': True, 'available': True})
 
-# ============== WebSocket ==============
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    # Read session from cookie via SessionMiddleware
-    username = websocket.session.get('user')
-    if not username:
-        await websocket.close(code=4001)
-        return
-
-    with get_db() as conn:
-        user = conn.execute('SELECT id FROM users WHERE username = ?', (username,)).fetchone()
-    if not user:
-        await websocket.close(code=4001)
-        return
-
-    user_id = user['id']
-    session_id = f"ws_{uuid.uuid4().hex[:8]}"
-    await manager.connect(user_id, session_id, websocket)
-
-    try:
-        await websocket.send_json({"event": "connected", "data": {"user_id": user_id, "sessionId": session_id}})
-        while True:
-            await websocket.receive_text()  # Keep-alive
-    except WebSocketDisconnect:
-        manager.disconnect(user_id, session_id)
 
 # ============== Webhook ==============
 
@@ -1338,13 +1343,6 @@ async def webhook(request: Request):
     else:
         logger.info("Telegram bot code unchanged - skipping restart")
 
-    # Notify WebSocket clients before restart
-    logger.info('Notifying clients of server reload...')
-    try:
-        await manager.broadcast_all("server_shutdown", {"message": "Server reloading..."})
-    except Exception as e:
-        logger.error(f'Error notifying clients: {e}')
-
     # Send SIGTERM to self - Docker restart policy will restart the container
     logger.info("Sending SIGTERM for graceful shutdown...")
     graceful_reload()
@@ -1361,30 +1359,142 @@ def graceful_reload():
         stderr=subprocess.DEVNULL
     )
 
-# ============== Google Calendar Background Sync ==============
+# ============== Google Calendar Push Notifications ==============
 
-async def _calendar_sync_loop():
-    """Periodically poll Google Calendar for changes and sync to app."""
-    if not GOOGLE_CALENDAR_ENABLED:
-        return
-    logger.info('Google Calendar sync loop started (interval: %ds)', GOOGLE_CALENDAR_SYNC_INTERVAL)
-    await asyncio.sleep(10)  # Wait for app to fully start
-    while True:
-        try:
-            await _do_calendar_sync()
-        except Exception:
-            logger.error('Calendar sync loop error', exc_info=True)
-        await asyncio.sleep(GOOGLE_CALENDAR_SYNC_INTERVAL)
+@app.post("/api/google/webhook")
+async def google_calendar_webhook(request: Request):
+    """Receive push notifications from Google Calendar.
+    Google sends a POST when events change on a watched calendar."""
+    if INSTANCE_ROLE != 'primary':
+        return Response(status_code=200)
+    channel_id = request.headers.get("X-Goog-Channel-ID", "")
+    resource_state = request.headers.get("X-Goog-Resource-State", "")
 
-async def _do_calendar_sync():
-    """Run one round of Google Calendar → App sync for all connected users."""
+    # Ignore the initial sync message sent on channel creation
+    if resource_state == "sync":
+        return Response(status_code=200)
+
+    if not channel_id:
+        return Response(status_code=400)
+
+    # Find user by channel_id
+    with get_db() as conn:
+        row = conn.execute(
+            'SELECT user_id, sync_token, calendar_id FROM google_tokens WHERE watch_channel_id = ?',
+            (channel_id,)
+        ).fetchone()
+
+    if not row:
+        return Response(status_code=404)
+
+    # Trigger incremental sync for this user
+    logger.info('Calendar push notification for user %d (state: %s)', row['user_id'], resource_state)
+    asyncio.create_task(_do_calendar_sync_for_user(
+        row['user_id'], row['sync_token'], row['calendar_id'] or 'primary'
+    ))
+    return Response(status_code=200)
+
+
+async def _do_calendar_sync_for_user(user_id, sync_token, calendar_id):
+    """Run incremental sync for a single user (triggered by push notification)."""
     from BACKEND.google_calendar import (
         get_google_credentials, get_calendar_service, sync_calendar_events,
         parse_event_times, strip_prefix
     )
+    try:
+        with get_db() as conn:
+            creds = get_google_credentials(conn, user_id, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
+            if not creds:
+                return
+
+        service = await asyncio.to_thread(get_calendar_service, creds)
+        effective_token = None if INSTANCE_ROLE != 'primary' else sync_token
+        events, new_token, is_full = await asyncio.to_thread(
+            sync_calendar_events, service, calendar_id, effective_token
+        )
+
+        if not events and not new_token:
+            return
+
+        with get_db() as conn:
+            for event in events:
+                event_id = event.get('id')
+                summary = event.get('summary', '')
+                status = event.get('status')
+
+                existing_task = conn.execute(
+                    'SELECT id, text FROM tasks WHERE google_event_id = ? AND user_id = ?',
+                    (event_id, user_id)
+                ).fetchone()
+
+                if status == 'cancelled':
+                    if existing_task:
+                        conn.execute('DELETE FROM tasks WHERE id = ?', (existing_task['id'],))
+                        conn.commit()
+                    continue
+
+                start_iso, end_iso = parse_event_times(event)
+                text = strip_prefix(summary)
+                if not text:
+                    continue
+
+                if existing_task:
+                    conn.execute(
+                        'UPDATE tasks SET text = ?, scheduled_start = ?, scheduled_end = ? WHERE id = ?',
+                        (text, start_iso, end_iso, existing_task['id'])
+                    )
+                    conn.commit()
+                elif start_iso and end_iso:
+                    task_id, xp = _new_task_id()
+                    conn.execute(
+                        'INSERT INTO tasks (id, user_id, text, xp_reward, scheduled_start, scheduled_end, google_event_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                        (task_id, user_id, text, xp, start_iso, end_iso, event_id)
+                    )
+                    conn.commit()
+
+            if new_token and INSTANCE_ROLE == 'primary':
+                conn.execute(
+                    'UPDATE google_tokens SET sync_token = ?, last_sync_at = ? WHERE user_id = ?',
+                    (new_token, datetime.now().isoformat(), user_id)
+                )
+                conn.commit()
+
+    except Exception:
+        logger.error('Calendar push sync failed for user %d', user_id, exc_info=True)
+
+
+# ============== Google Calendar Background Sync ==============
+
+async def _calendar_sync_loop():
+    """Periodically manage watch channels and poll as fallback."""
+    if not GOOGLE_CALENDAR_ENABLED:
+        return
+    is_primary = INSTANCE_ROLE == 'primary'
+    webhook_url = (APP_URL.rstrip('/') + '/api/google/webhook') if APP_URL and is_primary else ''
+    use_push = bool(webhook_url)
+    # With push: long interval as fallback; without push: short polling
+    interval = 300 if use_push else GOOGLE_CALENDAR_SYNC_INTERVAL
+    logger.warning('Calendar sync: role=%s, push=%s, interval=%ds', INSTANCE_ROLE, use_push, interval)
+    while True:
+        try:
+            await _do_calendar_sync(webhook_url if use_push else '')
+        except Exception:
+            logger.error('Calendar sync loop error', exc_info=True)
+        await asyncio.sleep(interval)
+
+async def _do_calendar_sync(webhook_url=''):
+    """Run one round of sync and ensure watch channels are active."""
+    from BACKEND.google_calendar import (
+        get_google_credentials, get_calendar_service, sync_calendar_events,
+        parse_event_times, strip_prefix, watch_calendar, stop_watch
+    )
 
     with get_db() as conn:
-        users = conn.execute('SELECT user_id, sync_token, calendar_id FROM google_tokens').fetchall()
+        users = conn.execute(
+            'SELECT user_id, sync_token, calendar_id, watch_channel_id, watch_resource_id, watch_expiration FROM google_tokens'
+        ).fetchall()
+
+    now_ms = int(datetime.now().timestamp() * 1000)
 
     for user_row in users:
         user_id = user_row['user_id']
@@ -1398,8 +1508,33 @@ async def _do_calendar_sync():
                     continue
 
             service = await asyncio.to_thread(get_calendar_service, creds)
-            events, new_token, is_full = await asyncio.to_thread(
-                sync_calendar_events, service, calendar_id, sync_token
+
+            # Register or renew watch channel if push is enabled (primary only)
+            if webhook_url and INSTANCE_ROLE == 'primary':
+                watch_exp = int(user_row['watch_expiration'] or 0)
+                # Renew if no channel or expiring within 1 hour
+                if not user_row['watch_channel_id'] or watch_exp - now_ms < 3600_000:
+                    # Stop old channel if exists
+                    if user_row['watch_channel_id'] and user_row['watch_resource_id']:
+                        await asyncio.to_thread(
+                            stop_watch, service, user_row['watch_channel_id'], user_row['watch_resource_id']
+                        )
+                    result = await asyncio.to_thread(watch_calendar, service, calendar_id, webhook_url)
+                    if result:
+                        ch_id, res_id, exp_ms = result
+                        with get_db() as conn:
+                            conn.execute(
+                                'UPDATE google_tokens SET watch_channel_id=?, watch_resource_id=?, watch_expiration=? WHERE user_id=?',
+                                (ch_id, res_id, str(exp_ms), user_id)
+                            )
+                            conn.commit()
+                        logger.info('Registered calendar watch for user %d (expires %s)',
+                                    user_id, datetime.fromtimestamp(exp_ms / 1000).isoformat())
+
+            # Replica always does full sync; primary uses incremental sync
+            effective_token = None if INSTANCE_ROLE != 'primary' else sync_token
+            events, new_token, _ = await asyncio.to_thread(
+                sync_calendar_events, service, calendar_id, effective_token
             )
 
             if not events and not new_token:
@@ -1411,18 +1546,15 @@ async def _do_calendar_sync():
                     summary = event.get('summary', '')
                     status = event.get('status')
 
-                    # Only process events with our prefix or events we created
                     existing_task = conn.execute(
                         'SELECT id, text FROM tasks WHERE google_event_id = ? AND user_id = ?',
                         (event_id, user_id)
                     ).fetchone()
 
                     if status == 'cancelled':
-                        # Event deleted in Calendar → delete task
                         if existing_task:
                             conn.execute('DELETE FROM tasks WHERE id = ?', (existing_task['id'],))
                             conn.commit()
-                            await send_user_event(user_id, 'task_deleted', {'id': existing_task['id']})
                         continue
 
                     start_iso, end_iso = parse_event_times(event)
@@ -1431,42 +1563,40 @@ async def _do_calendar_sync():
                         continue
 
                     if existing_task:
-                        # Event updated → update task
                         conn.execute(
                             'UPDATE tasks SET text = ?, scheduled_start = ?, scheduled_end = ? WHERE id = ?',
                             (text, start_iso, end_iso, existing_task['id'])
                         )
                         conn.commit()
-                        await send_user_event(user_id, 'task_updated', {
-                            'id': existing_task['id'], 'text': text,
-                            'scheduled_start': start_iso, 'scheduled_end': end_iso
-                        })
                     elif start_iso and end_iso:
-                        # New event with dates → create task
                         task_id, xp = _new_task_id()
                         conn.execute(
                             'INSERT INTO tasks (id, user_id, text, xp_reward, scheduled_start, scheduled_end, google_event_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
                             (task_id, user_id, text, xp, start_iso, end_iso, event_id)
                         )
                         conn.commit()
-                        await send_user_event(user_id, 'task_created', {
-                            'id': task_id, 'text': text, 'xp': xp,
-                            'scheduled_start': start_iso, 'scheduled_end': end_iso,
-                        })
 
-                # Update sync token
-                if new_token:
+                if new_token and INSTANCE_ROLE == 'primary':
                     conn.execute(
                         'UPDATE google_tokens SET sync_token = ?, last_sync_at = ? WHERE user_id = ?',
                         (new_token, datetime.now().isoformat(), user_id)
                     )
                     conn.commit()
 
-        except Exception:
-            logger.error('Calendar sync failed for user %d', user_id, exc_info=True)
+        except Exception as e:
+            from google.auth.exceptions import RefreshError
+            if isinstance(e, RefreshError) or 'invalid_grant' in str(e):
+                logger.warning('Expired Google token for user %d, removing credentials', user_id)
+                with get_db() as conn:
+                    conn.execute('DELETE FROM google_tokens WHERE user_id = ?', (user_id,))
+                    conn.commit()
+            else:
+                logger.error('Calendar sync failed for user %d', user_id, exc_info=True)
 
 @app.on_event('startup')
 async def start_calendar_sync():
+    logger.warning('Calendar startup: enabled=%s, role=%s, APP_URL=%s, CLIENT_ID=%s',
+                   GOOGLE_CALENDAR_ENABLED, INSTANCE_ROLE, APP_URL, bool(GOOGLE_CLIENT_ID))
     asyncio.create_task(_calendar_sync_loop())
 
 # ============== Init ==============
@@ -1488,5 +1618,6 @@ if __name__ == '__main__':
     uvicorn.run(
         "run:app", host='127.0.0.1', port=PORT,
         reload=debug_mode, reload_includes=['*.py'] if debug_mode else None,
-        proxy_headers=True, forwarded_allow_ips='*'
+        proxy_headers=True, forwarded_allow_ips='*',
+        ws_ping_interval=60, ws_ping_timeout=30
     )
