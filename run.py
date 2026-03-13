@@ -1,6 +1,6 @@
 import os, math, uuid, random, hashlib, hmac, subprocess, sqlite3, logging, json, asyncio
 import warnings
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from contextlib import contextmanager
 
 from fastapi import FastAPI, Request, Response, Form, UploadFile, File, Depends, HTTPException
@@ -208,9 +208,10 @@ def init_db():
         # Google Calendar migration: add schedule columns to tasks
         cursor = conn.execute("PRAGMA table_info(tasks)")
         existing_cols = {row[1] for row in cursor.fetchall()}
-        for col in ['scheduled_start', 'scheduled_end', 'google_event_id', 'completed_at', 'parent_id', 'recurrence_rule']:
+        for col in ['scheduled_start', 'scheduled_end', 'google_event_id', 'completed_at', 'parent_id', 'recurrence_rule', 'recurrence_source_id', 'is_gcal_sourced']:
             if col not in existing_cols:
-                conn.execute(f'ALTER TABLE tasks ADD COLUMN {col} TEXT')
+                default = ' DEFAULT 0' if col == 'is_gcal_sourced' else ''
+                conn.execute(f'ALTER TABLE tasks ADD COLUMN {col} TEXT{default}')
 
         conn.executescript('''
             CREATE TABLE IF NOT EXISTS google_tokens (
@@ -223,6 +224,12 @@ def init_db():
                 last_sync_at TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE);
             CREATE INDEX IF NOT EXISTS idx_tasks_google_event ON tasks(google_event_id);
+            CREATE TABLE IF NOT EXISTS gcal_deleted_events (
+                user_id INTEGER NOT NULL,
+                google_event_id TEXT NOT NULL,
+                deleted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, google_event_id)
+            );
         ''')
 
         # Google Calendar push notifications: add watch columns
@@ -375,6 +382,136 @@ async def _parse_json(request):
 def _new_task_id():
     """Generate unique task ID and random XP reward."""
     return f"{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}", random.randint(20, 35)
+
+
+def _generate_recurrence_instances(conn, user_id, source_task_id, text, xp, scheduled_start, scheduled_end, recurrence_rule_str, horizon_days=30):
+    """Generate recurring task instances for the next horizon_days.
+
+    Deletes old uncompleted instances first, then creates new ones.
+    source_task_id: the original recurring task's ID.
+    """
+    # Delete existing uncompleted future instances for this source
+    conn.execute(
+        'DELETE FROM tasks WHERE recurrence_source_id = ? AND user_id = ? AND completed_at IS NULL',
+        (source_task_id, user_id)
+    )
+
+    if not recurrence_rule_str:
+        return
+
+    try:
+        rule = json.loads(recurrence_rule_str) if isinstance(recurrence_rule_str, str) else recurrence_rule_str
+    except (json.JSONDecodeError, TypeError):
+        return
+
+    freq = rule.get('frequency')
+    interval = max(1, rule.get('interval', 1))
+    end_type = rule.get('endType', 'never')
+    end_date = None
+    end_count = None
+    if end_type == 'date' and rule.get('endDate'):
+        try:
+            end_date = datetime.fromisoformat(rule['endDate'])
+        except ValueError:
+            pass
+    elif end_type == 'count':
+        end_count = rule.get('endCount', 10)
+
+    # Parse base start/end (strip timezone to keep everything naive UTC)
+    def _parse_naive(iso):
+        if not iso:
+            return datetime.utcnow()
+        try:
+            dt = datetime.fromisoformat(iso.replace('Z', '+00:00'))
+            return dt.replace(tzinfo=None) if dt.tzinfo else dt
+        except ValueError:
+            return datetime.utcnow()
+
+    base_start = _parse_naive(scheduled_start)
+    base_end = _parse_naive(scheduled_end)
+
+    duration = base_end - base_start
+    horizon = datetime.utcnow() + timedelta(days=horizon_days)
+    weekdays = rule.get('weekdays', [])
+    month_day = rule.get('monthDay')
+
+    from dateutil.relativedelta import relativedelta
+
+    instances_created = 0
+    step = 1  # occurrence counter (0 = the original task itself)
+    max_iterations = 400  # safety limit
+
+    current = base_start
+    for _ in range(max_iterations):
+        # Advance to next occurrence
+        if freq == 'daily':
+            current = current + timedelta(days=interval * step)
+        elif freq == 'weekly':
+            if weekdays:
+                # Find next matching weekday
+                current = _next_weekday_occurrence(base_start, weekdays, interval, step)
+                if current is None:
+                    break
+            else:
+                current = current + timedelta(weeks=interval * step)
+        elif freq == 'monthly':
+            current = base_start + relativedelta(months=interval * step)
+            if month_day:
+                try:
+                    current = current.replace(day=min(month_day, 28))
+                except ValueError:
+                    pass
+        elif freq == 'yearly':
+            current = base_start + relativedelta(years=interval * step)
+        else:
+            break
+
+        step += 1
+
+        # Check bounds
+        if current > horizon:
+            break
+        if end_date and current.date() > end_date.date():
+            break
+        if end_count and instances_created >= end_count:
+            break
+        if current <= base_start:
+            continue
+
+        # Create instance
+        inst_id, inst_xp = _new_task_id()
+        inst_start = current.isoformat()
+        inst_end = (current + duration).isoformat()
+        conn.execute(
+            'INSERT INTO tasks (id, user_id, text, xp_reward, scheduled_start, scheduled_end, recurrence_source_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (inst_id, user_id, text, xp, inst_start, inst_end, source_task_id)
+        )
+        instances_created += 1
+
+
+def _next_weekday_occurrence(base_start, weekdays, interval, step):
+    """Compute the step-th weekly-weekday occurrence from base_start."""
+    if not weekdays:
+        return None
+    # Sort weekdays (0=Mon..6=Sun)
+    sorted_days = sorted(weekdays)
+    # base weekday: Monday=0
+    base_wd = base_start.weekday()
+
+    # Build flat list of all occurrences
+    occurrence = 0
+    week_offset = 0
+    max_weeks = 200
+    while week_offset < max_weeks:
+        for wd in sorted_days:
+            candidate = base_start + timedelta(weeks=week_offset * interval, days=wd - base_wd)
+            if candidate <= base_start:
+                continue
+            occurrence += 1
+            if occurrence == step:
+                return candidate
+        week_offset += 1
+    return None
 
 # Cache version after first read
 _version_cache = None
@@ -566,8 +703,9 @@ async def api_get_state(user_id: int = Depends(get_authenticated_user)):
         tasks = [{'id': t['id'], 'text': t['text'], 'xp': t['xp_reward'], 'media': media_map.get(t['id']),
                   'scheduled_start': t['scheduled_start'], 'scheduled_end': t['scheduled_end'],
                   'completed_at': t['completed_at'], 'parent_id': t['parent_id'],
-                  'recurrence_rule': t['recurrence_rule']}
-                 for t in conn.execute('SELECT id, text, xp_reward, scheduled_start, scheduled_end, completed_at, parent_id, recurrence_rule FROM tasks WHERE user_id = ? ORDER BY created_at DESC', (user_id,))]
+                  'recurrence_rule': t['recurrence_rule'], 'recurrence_source_id': t['recurrence_source_id'],
+                  'is_gcal_sourced': t['is_gcal_sourced'] == '1'}
+                 for t in conn.execute('SELECT id, text, xp_reward, scheduled_start, scheduled_end, completed_at, parent_id, recurrence_rule, recurrence_source_id, is_gcal_sourced FROM tasks WHERE user_id = ? ORDER BY created_at DESC', (user_id,))]
         achievements = {a['achievement_id']: True for a in conn.execute('SELECT achievement_id FROM user_achievements WHERE user_id = ?', (user_id,))}
         result = {
             'tasks': tasks, 'level': progress['level'], 'xp': progress['xp'], 'xpMax': progress['xp_max'],
@@ -625,7 +763,7 @@ async def api_create_task(request: Request, user_id: int = Depends(get_authentic
                 service, cal_id = _gcal_service(conn, user_id)
                 if service:
                     from BACKEND.google_calendar import create_calendar_event
-                    google_event_id = create_calendar_event(service, cal_id, text, scheduled_start, scheduled_end)
+                    google_event_id = create_calendar_event(service, cal_id, text, scheduled_start, scheduled_end, recurrence_rule)
                     if google_event_id:
                         conn.execute('UPDATE tasks SET google_event_id = ? WHERE id = ?', (google_event_id, task_id))
             except Exception:
@@ -634,6 +772,10 @@ async def api_create_task(request: Request, user_id: int = Depends(get_authentic
         # Log activity
         conn.execute('''INSERT INTO activity_log (user_id, activity_type, task_text, xp_earned)
                         VALUES (?, 'task_created', ?, ?)''', (user_id, text, 3))
+
+        # Generate recurrence instances
+        if recurrence_rule and not parent_id:
+            _generate_recurrence_instances(conn, user_id, task_id, text, xp, scheduled_start, scheduled_end, recurrence_rule)
 
         conn.commit()
 
@@ -651,11 +793,30 @@ async def api_update_task(task_id: str, request: Request, user_id: int = Depends
     if err: return err
     scheduled_start = data.get('scheduled_start')
     scheduled_end = data.get('scheduled_end')
-    recurrence_rule = data.get('recurrence_rule')
+    _sentinel = object()
+    recurrence_rule = data.get('recurrence_rule', _sentinel)
+    recurrence_rule_provided = recurrence_rule is not _sentinel
+    if recurrence_rule is _sentinel:
+        recurrence_rule = None
     if recurrence_rule is not None and isinstance(recurrence_rule, dict):
         recurrence_rule = json.dumps(recurrence_rule)
+    detach_from_series = data.get('detach_from_series', False)
 
     with get_db() as conn:
+        # Detach instance from recurring series: keep this task, delete all others in series
+        if detach_from_series:
+            task_row = conn.execute('SELECT recurrence_source_id FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
+            if task_row and task_row['recurrence_source_id']:
+                source_id = task_row['recurrence_source_id']
+                # Delete other instances (not this one)
+                conn.execute('DELETE FROM tasks WHERE recurrence_source_id = ? AND user_id = ? AND id != ?', (source_id, user_id, task_id))
+                # Clear recurrence_rule on source task
+                conn.execute('UPDATE tasks SET recurrence_rule = NULL WHERE id = ? AND user_id = ?', (source_id, user_id))
+                # Detach this task from the series
+                conn.execute('UPDATE tasks SET recurrence_source_id = NULL, recurrence_rule = NULL WHERE id = ? AND user_id = ?', (task_id, user_id))
+                conn.commit()
+                return JSONResponse({'success': True})
+
         # Build dynamic update
         updates = ['text = ?']
         params = [text]
@@ -665,7 +826,7 @@ async def api_update_task(task_id: str, request: Request, user_id: int = Depends
         if scheduled_end is not None:
             updates.append('scheduled_end = ?')
             params.append(scheduled_end or None)
-        if recurrence_rule is not None:
+        if recurrence_rule_provided:
             updates.append('recurrence_rule = ?')
             params.append(recurrence_rule or None)
         params.extend([task_id, user_id])
@@ -673,15 +834,22 @@ async def api_update_task(task_id: str, request: Request, user_id: int = Depends
 
         # Sync to Google Calendar
         if GOOGLE_CALENDAR_ENABLED:
-            task = conn.execute('SELECT google_event_id, scheduled_start, scheduled_end FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
+            task = conn.execute('SELECT google_event_id, scheduled_start, scheduled_end, recurrence_rule FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
             if task and task['google_event_id']:
                 try:
                     service, cal_id = _gcal_service(conn, user_id)
                     if service:
                         from BACKEND.google_calendar import update_calendar_event
-                        update_calendar_event(service, cal_id, task['google_event_id'], text, task['scheduled_start'], task['scheduled_end'])
+                        update_calendar_event(service, cal_id, task['google_event_id'], text, task['scheduled_start'], task['scheduled_end'], task['recurrence_rule'])
                 except Exception:
                     logger.error('Failed to sync task update to Google Calendar', exc_info=True)
+
+        # Regenerate recurrence instances when recurrence_rule changes (skip for GCal-sourced)
+        if recurrence_rule_provided:
+            task_row = conn.execute('SELECT xp_reward, scheduled_start, scheduled_end, recurrence_rule, parent_id, is_gcal_sourced FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
+            if task_row and not task_row['parent_id'] and task_row['is_gcal_sourced'] != '1':
+                _generate_recurrence_instances(conn, user_id, task_id, text, task_row['xp_reward'],
+                                               task_row['scheduled_start'], task_row['scheduled_end'], task_row['recurrence_rule'])
 
         conn.commit()
 
@@ -690,7 +858,7 @@ async def api_update_task(task_id: str, request: Request, user_id: int = Depends
         event_data['scheduled_start'] = scheduled_start or None
     if scheduled_end is not None:
         event_data['scheduled_end'] = scheduled_end or None
-    if recurrence_rule is not None:
+    if recurrence_rule_provided:
         event_data['recurrence_rule'] = recurrence_rule or None
     return JSONResponse({'success': True})
 
@@ -708,8 +876,20 @@ async def api_delete_task(task_id: str, user_id: int = Depends(get_authenticated
                         delete_calendar_event(service, cal_id, task['google_event_id'])
                 except Exception:
                     logger.error('Failed to sync task deletion to Google Calendar', exc_info=True)
+                # Record so sync won't recreate this event
+                conn.execute('INSERT OR IGNORE INTO gcal_deleted_events (user_id, google_event_id) VALUES (?,?)',
+                             (user_id, task['google_event_id']))
 
-        # Delete subtasks first, then the task itself
+            # Also record gcal event IDs from recurrence instances being cascade-deleted
+            for inst in conn.execute(
+                'SELECT google_event_id FROM tasks WHERE recurrence_source_id = ? AND user_id = ? AND google_event_id IS NOT NULL',
+                (task_id, user_id)
+            ).fetchall():
+                conn.execute('INSERT OR IGNORE INTO gcal_deleted_events (user_id, google_event_id) VALUES (?,?)',
+                             (user_id, inst['google_event_id']))
+
+        # Delete recurrence instances, subtasks, then the task itself
+        conn.execute('DELETE FROM tasks WHERE recurrence_source_id = ? AND user_id = ?', (task_id, user_id))
         conn.execute('DELETE FROM tasks WHERE parent_id = ? AND user_id = ?', (task_id, user_id))
         conn.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id))
         conn.commit()
@@ -743,9 +923,23 @@ async def api_complete_task(task_id: str, request: Request, user_id: int = Depen
                     delete_calendar_event(service, cal_id, task['google_event_id'])
             except Exception:
                 logger.error('Failed to delete calendar event on task completion', exc_info=True)
+            # Record so sync won't recreate this event
+            conn.execute('INSERT OR IGNORE INTO gcal_deleted_events (user_id, google_event_id) VALUES (?,?)',
+                         (user_id, task['google_event_id']))
 
         completed_at = datetime.utcnow().isoformat()
         conn.execute('UPDATE tasks SET completed_at = ? WHERE id = ?', (completed_at, task_id))
+
+        # Replenish recurrence window: if this task belongs to a recurring source, top up instances
+        # Skip for GCal-sourced tasks — GCal manages their recurrence
+        source_id = task['recurrence_source_id'] if task['recurrence_source_id'] else (task_id if task['recurrence_rule'] else None)
+        if source_id:
+            source = conn.execute('SELECT id, text, xp_reward, scheduled_start, scheduled_end, recurrence_rule, is_gcal_sourced FROM tasks WHERE id = ? AND user_id = ?',
+                                  (source_id, user_id)).fetchone()
+            if source and source['recurrence_rule'] and source['is_gcal_sourced'] != '1':
+                _generate_recurrence_instances(conn, user_id, source['id'], source['text'], source['xp_reward'],
+                                               source['scheduled_start'], source['scheduled_end'], source['recurrence_rule'])
+
         conn.commit()
 
     return JSONResponse({
@@ -1427,11 +1621,64 @@ async def google_calendar_webhook(request: Request):
     return Response(status_code=200)
 
 
+def _process_sync_events(conn, user_id, events):
+    """Shared logic for processing Google Calendar sync events."""
+    from BACKEND.google_calendar import parse_event_times, strip_prefix
+
+    for event in events:
+        event_id = event.get('id')
+        summary = event.get('summary', '')
+        status = event.get('status')
+
+        existing_task = conn.execute(
+            'SELECT id, text FROM tasks WHERE google_event_id = ? AND user_id = ?',
+            (event_id, user_id)
+        ).fetchone()
+
+        if status == 'cancelled':
+            if existing_task:
+                conn.execute('DELETE FROM tasks WHERE id = ?', (existing_task['id'],))
+                conn.commit()
+            continue
+
+        start_iso, end_iso = parse_event_times(event)
+        text = strip_prefix(summary)
+        if not text:
+            continue
+
+        # Skip events beyond 30-day horizon
+        if start_iso and not existing_task:
+            horizon = (datetime.utcnow() + timedelta(days=30)).isoformat() + 'Z'
+            if start_iso > horizon:
+                continue
+
+        if existing_task:
+            conn.execute(
+                'UPDATE tasks SET text = ?, scheduled_start = ?, scheduled_end = ? WHERE id = ?',
+                (text, start_iso, end_iso, existing_task['id'])
+            )
+            conn.commit()
+        elif start_iso and end_iso:
+            # Skip events we intentionally deleted/completed
+            was_deleted = conn.execute(
+                'SELECT 1 FROM gcal_deleted_events WHERE user_id=? AND google_event_id=?',
+                (user_id, event_id)
+            ).fetchone()
+            if was_deleted:
+                continue
+
+            task_id, xp = _new_task_id()
+            conn.execute(
+                'INSERT INTO tasks (id, user_id, text, xp_reward, scheduled_start, scheduled_end, google_event_id, is_gcal_sourced) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                (task_id, user_id, text, xp, start_iso, end_iso, event_id, '1')
+            )
+            conn.commit()
+
+
 async def _do_calendar_sync_for_user(user_id, sync_token, calendar_id):
     """Run incremental sync for a single user (triggered by push notification)."""
     from BACKEND.google_calendar import (
-        get_google_credentials, get_calendar_service, sync_calendar_events,
-        parse_event_times, strip_prefix
+        get_google_credentials, get_calendar_service, sync_calendar_events
     )
     try:
         with get_db() as conn:
@@ -1449,40 +1696,7 @@ async def _do_calendar_sync_for_user(user_id, sync_token, calendar_id):
             return
 
         with get_db() as conn:
-            for event in events:
-                event_id = event.get('id')
-                summary = event.get('summary', '')
-                status = event.get('status')
-
-                existing_task = conn.execute(
-                    'SELECT id, text FROM tasks WHERE google_event_id = ? AND user_id = ?',
-                    (event_id, user_id)
-                ).fetchone()
-
-                if status == 'cancelled':
-                    if existing_task:
-                        conn.execute('DELETE FROM tasks WHERE id = ?', (existing_task['id'],))
-                        conn.commit()
-                    continue
-
-                start_iso, end_iso = parse_event_times(event)
-                text = strip_prefix(summary)
-                if not text:
-                    continue
-
-                if existing_task:
-                    conn.execute(
-                        'UPDATE tasks SET text = ?, scheduled_start = ?, scheduled_end = ? WHERE id = ?',
-                        (text, start_iso, end_iso, existing_task['id'])
-                    )
-                    conn.commit()
-                elif start_iso and end_iso:
-                    task_id, xp = _new_task_id()
-                    conn.execute(
-                        'INSERT INTO tasks (id, user_id, text, xp_reward, scheduled_start, scheduled_end, google_event_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                        (task_id, user_id, text, xp, start_iso, end_iso, event_id)
-                    )
-                    conn.commit()
+            _process_sync_events(conn, user_id, events)
 
             if new_token and INSTANCE_ROLE == 'primary':
                 conn.execute(
@@ -1518,7 +1732,7 @@ async def _do_calendar_sync(webhook_url=''):
     """Run one round of sync and ensure watch channels are active."""
     from BACKEND.google_calendar import (
         get_google_credentials, get_calendar_service, sync_calendar_events,
-        parse_event_times, strip_prefix, watch_calendar, stop_watch
+        watch_calendar, stop_watch
     )
 
     with get_db() as conn:
@@ -1573,40 +1787,13 @@ async def _do_calendar_sync(webhook_url=''):
                 continue
 
             with get_db() as conn:
-                for event in events:
-                    event_id = event.get('id')
-                    summary = event.get('summary', '')
-                    status = event.get('status')
+                _process_sync_events(conn, user_id, events)
 
-                    existing_task = conn.execute(
-                        'SELECT id, text FROM tasks WHERE google_event_id = ? AND user_id = ?',
-                        (event_id, user_id)
-                    ).fetchone()
-
-                    if status == 'cancelled':
-                        if existing_task:
-                            conn.execute('DELETE FROM tasks WHERE id = ?', (existing_task['id'],))
-                            conn.commit()
-                        continue
-
-                    start_iso, end_iso = parse_event_times(event)
-                    text = strip_prefix(summary)
-                    if not text:
-                        continue
-
-                    if existing_task:
-                        conn.execute(
-                            'UPDATE tasks SET text = ?, scheduled_start = ?, scheduled_end = ? WHERE id = ?',
-                            (text, start_iso, end_iso, existing_task['id'])
-                        )
-                        conn.commit()
-                    elif start_iso and end_iso:
-                        task_id, xp = _new_task_id()
-                        conn.execute(
-                            'INSERT INTO tasks (id, user_id, text, xp_reward, scheduled_start, scheduled_end, google_event_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                            (task_id, user_id, text, xp, start_iso, end_iso, event_id)
-                        )
-                        conn.commit()
+                # Periodic cleanup: remove old gcal_deleted_events (>90 days)
+                conn.execute(
+                    "DELETE FROM gcal_deleted_events WHERE deleted_at < datetime('now', '-90 days')"
+                )
+                conn.commit()
 
                 if new_token and INSTANCE_ROLE == 'primary':
                     conn.execute(

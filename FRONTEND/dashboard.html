@@ -283,6 +283,26 @@
             </div>
         </div>
 
+        <!-- Recurrence Choice Dialog -->
+        <div id="recurrence-choice-popup" class="recurrence-choice-overlay" role="dialog" aria-label="Edit recurring task">
+            <div class="recurrence-choice-content">
+                <div class="recurrence-choice-header">
+                    <span>Recurring task</span>
+                    <button class="recurrence-choice-close" id="recurrence-choice-close" aria-label="Close">&times;</button>
+                </div>
+                <div class="recurrence-choice-buttons">
+                    <button class="recurrence-choice-btn" id="recurrence-choice-this">
+                        <span class="rcb-icon">&#128221;</span>
+                        <span class="rcb-label">This event</span>
+                    </button>
+                    <button class="recurrence-choice-btn" id="recurrence-choice-all">
+                        <span class="rcb-icon">&#128257;</span>
+                        <span class="rcb-label">All events</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- Date Editor Popup -->
         <div id="date-editor-popup" class="date-editor-overlay" role="dialog" aria-label="Edit dates">
             <div class="date-editor-content">
@@ -301,23 +321,30 @@
                     </label>
                 </div>
                 <div class="date-editor-recurrence">
-                    <label class="date-editor-repeat-toggle">
-                        <input type="checkbox" id="date-editor-repeat">
-                        <span>Repeats</span>
+                    <label class="date-editor-label">
+                        <span>Repeat</span>
+                        <select id="recurrence-preset">
+                            <option value="none">Does not repeat</option>
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly on ...</option>
+                            <option value="monthly">Monthly on ...</option>
+                            <option value="yearly">Yearly on ...</option>
+                            <option value="weekdays">Every weekday (Mon-Fri)</option>
+                            <option value="custom">Custom...</option>
+                        </select>
                     </label>
-                    <div class="recurrence-options" id="recurrence-options">
+                    <div class="recurrence-custom" id="recurrence-custom">
                         <label class="date-editor-label">
-                            <span>Frequency</span>
-                            <select id="recurrence-freq">
-                                <option value="daily">Daily</option>
-                                <option value="weekly">Weekly</option>
-                                <option value="monthly">Monthly</option>
-                                <option value="yearly">Yearly</option>
-                            </select>
-                        </label>
-                        <label class="date-editor-label">
-                            <span>Every</span>
-                            <input type="number" id="recurrence-interval" min="1" max="99" value="1">
+                            <span>Repeat every</span>
+                            <div class="recurrence-every-row">
+                                <input type="number" id="recurrence-interval" min="1" max="99" value="1">
+                                <select id="recurrence-freq">
+                                    <option value="daily">days</option>
+                                    <option value="weekly">weeks</option>
+                                    <option value="monthly">months</option>
+                                    <option value="yearly">years</option>
+                                </select>
+                            </div>
                         </label>
                         <div class="recurrence-weekdays" id="recurrence-weekdays">
                             <button type="button" class="weekday-btn" data-day="0">Mo</button>
@@ -328,19 +355,13 @@
                             <button type="button" class="weekday-btn" data-day="5">Sa</button>
                             <button type="button" class="weekday-btn" data-day="6">Su</button>
                         </div>
-                        <div class="recurrence-monthly" id="recurrence-monthly">
-                            <label class="date-editor-label">
-                                <span>On day</span>
-                                <input type="number" id="recurrence-monthday" min="1" max="31" value="1">
-                            </label>
-                        </div>
                         <div class="recurrence-end-section">
                             <label class="date-editor-label">
                                 <span>Ends</span>
                                 <select id="recurrence-end-type">
                                     <option value="never">Never</option>
                                     <option value="date">On date</option>
-                                    <option value="count">After N times</option>
+                                    <option value="count">After N occurrences</option>
                                 </select>
                             </label>
                             <input type="date" id="recurrence-end-date" class="recurrence-end-field" style="display:none">

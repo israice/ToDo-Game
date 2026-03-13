@@ -47,7 +47,54 @@ def get_calendar_service(creds):
     return build('calendar', 'v3', credentials=creds, cache_discovery=False)
 
 
-def task_to_event(text, start_iso, end_iso):
+def recurrence_rule_to_rrule(rule):
+    """Convert our recurrence_rule JSON/dict to a Google Calendar RRULE string.
+
+    Returns a list like ['RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR'] or [].
+    """
+    if not rule:
+        return []
+    if isinstance(rule, str):
+        import json
+        try:
+            rule = json.loads(rule)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    freq_map = {'daily': 'DAILY', 'weekly': 'WEEKLY', 'monthly': 'MONTHLY', 'yearly': 'YEARLY'}
+    freq = freq_map.get(rule.get('frequency'))
+    if not freq:
+        return []
+
+    parts = [f'FREQ={freq}']
+
+    interval = rule.get('interval', 1)
+    if interval and interval > 1:
+        parts.append(f'INTERVAL={interval}')
+
+    # Weekly: BYDAY
+    if freq == 'WEEKLY' and rule.get('weekdays'):
+        day_names = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']
+        days = [day_names[d] for d in rule['weekdays'] if 0 <= d <= 6]
+        if days:
+            parts.append('BYDAY=' + ','.join(days))
+
+    # Monthly: BYMONTHDAY
+    if freq == 'MONTHLY' and rule.get('monthDay'):
+        parts.append(f'BYMONTHDAY={rule["monthDay"]}')
+
+    # End condition
+    end_type = rule.get('endType', 'never')
+    if end_type == 'count' and rule.get('endCount'):
+        parts.append(f'COUNT={rule["endCount"]}')
+    elif end_type == 'date' and rule.get('endDate'):
+        # UNTIL format: YYYYMMDD
+        parts.append('UNTIL=' + rule['endDate'].replace('-', '') + 'T235959Z')
+
+    return ['RRULE:' + ';'.join(parts)]
+
+
+def task_to_event(text, start_iso, end_iso, recurrence_rule=None):
     """Convert task data to a Google Calendar event dict."""
     event = {'summary': text}
 
@@ -68,12 +115,16 @@ def task_to_event(text, start_iso, end_iso):
     else:
         event['end'] = dict(event['start'])
 
+    rrule = recurrence_rule_to_rrule(recurrence_rule)
+    if rrule:
+        event['recurrence'] = rrule
+
     return event
 
 
-def create_calendar_event(service, calendar_id, text, start_iso, end_iso):
+def create_calendar_event(service, calendar_id, text, start_iso, end_iso, recurrence_rule=None):
     """Create a new event in Google Calendar. Returns the event ID."""
-    event = task_to_event(text, start_iso, end_iso)
+    event = task_to_event(text, start_iso, end_iso, recurrence_rule)
     try:
         result = service.events().insert(calendarId=calendar_id, body=event).execute()
         return result.get('id')
@@ -82,9 +133,9 @@ def create_calendar_event(service, calendar_id, text, start_iso, end_iso):
         return None
 
 
-def update_calendar_event(service, calendar_id, event_id, text, start_iso, end_iso):
+def update_calendar_event(service, calendar_id, event_id, text, start_iso, end_iso, recurrence_rule=None):
     """Update an existing event in Google Calendar."""
-    event = task_to_event(text, start_iso, end_iso)
+    event = task_to_event(text, start_iso, end_iso, recurrence_rule)
     try:
         service.events().update(calendarId=calendar_id, eventId=event_id, body=event).execute()
         return True
@@ -122,8 +173,9 @@ def sync_calendar_events(service, calendar_id, sync_token=None):
             if sync_token and not is_full_sync:
                 kwargs['syncToken'] = sync_token
             else:
-                # Full sync: get events from 30 days ago onward
+                # Full sync: get events from 30 days ago to 30 days ahead
                 kwargs['timeMin'] = (datetime.now(timezone.utc) - timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%SZ')
+                kwargs['timeMax'] = (datetime.now(timezone.utc) + timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%SZ')
             if page_token:
                 kwargs['pageToken'] = page_token
 

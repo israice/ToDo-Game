@@ -22,6 +22,10 @@ let audioCtx = null;
 // Polling interval for state sync (ms)
 const POLL_INTERVAL_MS = 5000;
 
+// Dev hot-reload state (used by loadState)
+let _devCssHash = null;
+let _devOtherHash = null;
+
 // Media popup state
 let currentMediaTaskId = null;
 let cameraStream = null;
@@ -195,7 +199,8 @@ function buildTaskElements(task, depth) {
   const endDateSpan = createDateSpan(end, sameDate ? 'task-date-same' : 'task-date-end');
   const datesWrapper = document.createElement('div');
   datesWrapper.className = 'task-dates';
-  if (task.recurrence_rule) datesWrapper.classList.add('has-recurrence');
+  if (task.recurrence_rule || task.recurrence_source_id) datesWrapper.classList.add('has-recurrence');
+  if (task.is_gcal_sourced) datesWrapper.classList.add('gcal-sourced');
   datesWrapper.appendChild(startDateSpan);
   datesWrapper.appendChild(endDateSpan);
 
@@ -208,13 +213,18 @@ function buildTaskElements(task, depth) {
   timeIcon.className = 'task-time-icon';
   timeIcon.textContent = timeIconText;
 
+  const magicBtn = document.createElement('button');
+  magicBtn.className = 'task-magic';
+  magicBtn.setAttribute('aria-label', 'Magic');
+  magicBtn.textContent = '\u{1FA84}';
+
   const addSubBtn = document.createElement('button');
   addSubBtn.className = 'task-add-sub';
   addSubBtn.setAttribute('aria-label', 'Add subtask');
   addSubBtn.textContent = '+';
   if (depth >= 5) addSubBtn.style.display = 'none';
 
-  return { timePeriod, mediaSpan, textSpan, datesWrapper, deleteBtn, timeIcon, addSubBtn };
+  return { timePeriod, mediaSpan, textSpan, datesWrapper, deleteBtn, timeIcon, magicBtn, addSubBtn };
 }
 
 function assembleTaskItem(li, parts) {
@@ -222,6 +232,7 @@ function assembleTaskItem(li, parts) {
   li.appendChild(parts.checkLabel);
   li.appendChild(parts.timeIcon);
   li.appendChild(parts.textSpan);
+  li.appendChild(parts.magicBtn);
   li.appendChild(parts.addSubBtn);
   li.appendChild(parts.datesWrapper);
   li.appendChild(parts.deleteBtn);
@@ -236,10 +247,10 @@ function wireTaskEvents(li, task, parts) {
   } else {
     checkLabel.querySelector('input').onchange = () => completeTask(task.id, li);
   }
-  deleteBtn.onclick = () => deleteTask(task.id, li);
+  deleteBtn.onclick = () => _handleRecurringAction(task.id, li, 'delete');
   mediaSpan.onclick = () => openMediaPopup(task.id);
   addSubBtn.onclick = (e) => { e.stopPropagation(); showSubtaskInput(task.id); };
-  datesWrapper.onclick = (e) => { e.stopPropagation(); openDateEditor(task.id); };
+  datesWrapper.onclick = (e) => { e.stopPropagation(); _handleRecurringAction(task.id, li, 'edit'); };
   datesWrapper.style.cursor = 'pointer';
 }
 
@@ -366,6 +377,24 @@ async function api(url, options = {}) {
 async function loadState() {
   const data = await api('/api/state');
   if (data) {
+    // Dev hot-reload: check file hashes returned by server in debug mode
+    if (data._devHash) {
+      const { css, other } = data._devHash;
+      if (_devCssHash === null) { _devCssHash = css; _devOtherHash = other; }
+      else if (other !== _devOtherHash) {
+        console.log('\uD83D\uDD04 Dev files changed \u2014 reloading page');
+        window.location.reload(true);
+        return;
+      } else if (css !== _devCssHash) {
+        console.log('\uD83D\uDD04 CSS changed \u2014 hot-swapping styles');
+        _devCssHash = css;
+        document.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
+          const url = new URL(link.href);
+          url.searchParams.set('_r', Date.now());
+          link.href = url.toString();
+        });
+      }
+    }
     state = { ...state, ...data };
     renderTasks();
     renderAchievements();
@@ -373,7 +402,6 @@ async function loadState() {
   }
   // Hide skeleton loader
   $('skeleton-loader')?.classList.add('hidden');
-  
 }
 
 
@@ -1046,7 +1074,7 @@ function initTaskDrag() {
       }, 500);
     }
 
-    // Skip drum drag if touching scrollable center text (allow internal scroll)
+    // Skip drum drag only if touching directly on scrollable task-text (allow internal scroll)
     const centerText = e.target.closest('.center .task-text');
     if (centerText && centerText.scrollHeight > centerText.clientHeight) {
       // Temporarily allow vertical touch scroll on the list
@@ -1133,12 +1161,9 @@ function initTaskDrag() {
   list.addEventListener('wheel', e => {
     // During editing, let scroll happen inside the text
     if (e.target.closest('[contenteditable="true"]')) return;
-    // Block drum scroll while cursor is inside multiline center card
-    const centerItem = e.target.closest('.center');
-    if (centerItem) {
-      const ct = centerItem.querySelector('.task-text');
-      if (ct && ct.scrollHeight > ct.clientHeight) return;
-    }
+    // Block drum scroll only when cursor is directly over scrollable task-text
+    const taskText = e.target.closest('.center .task-text');
+    if (taskText && taskText.scrollHeight > taskText.clientHeight) return;
     e.preventDefault();
     cancelAnimationFrame(_drumSnapRaf);
     _drumScrollTarget = null;
@@ -1376,7 +1401,7 @@ async function deleteTask(id, el) {
 
   setTimeout(() => {
     if (_subtaskInputParentId === id) _subtaskInputParentId = null;
-    state.tasks = state.tasks.filter(t => t.id !== id && t.parent_id !== id);
+    state.tasks = state.tasks.filter(t => t.id !== id && t.parent_id !== id && t.recurrence_source_id !== id);
     adjustScrollAfterRemove();
     renderTasks();
   }, TASK_DELETE_ANIMATION_MS);
@@ -2449,38 +2474,6 @@ function startAutoRefresh() {
 // Start auto-refresh
 startAutoRefresh();
 
-// ========== DEV FILE HASH POLLING ==========
-let _devCssHash = null;
-let _devOtherHash = null;
-let _devPollTimer = null;
-
-function startDevPoll() {
-  if (_devPollTimer) return;
-  _devPollTimer = setInterval(async () => {
-    if (document.hidden) return;
-    try {
-      const res = await fetch('/api/files-hash');
-      if (!res.ok) return;
-      const { css, other } = await res.json();
-      if (_devCssHash === null) { _devCssHash = css; _devOtherHash = other; return; }
-      if (other !== _devOtherHash) {
-        console.log('🔄 Dev files changed — reloading page');
-        window.location.reload(true);
-        return;
-      }
-      if (css !== _devCssHash) {
-        console.log('🔄 CSS changed — hot-swapping styles');
-        _devCssHash = css;
-        document.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
-          const url = new URL(link.href);
-          url.searchParams.set('_r', Date.now());
-          link.href = url.toString();
-        });
-      }
-    } catch {}
-  }, 5000);
-}
-startDevPoll();
 
 // ========== DATE EDITOR POPUP ==========
 let _dateEditorTaskId = null;
@@ -2493,6 +2486,37 @@ function toLocalDatetimeStr(isoStr) {
   return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
 
+const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function _updatePresetLabels(d) {
+  // Dynamically update preset option labels based on the task's start date
+  const sel = $('recurrence-preset');
+  const wd = d.getDay(); // 0=Sun..6=Sat
+  const wdIdx = wd === 0 ? 6 : wd - 1; // 0=Mon..6=Sun
+  const dayName = DAY_NAMES[wdIdx];
+  const monthDay = d.getDate();
+  const monthName = MONTH_NAMES[d.getMonth()];
+  for (const opt of sel.options) {
+    if (opt.value === 'weekly') opt.textContent = 'Weekly on ' + dayName;
+    if (opt.value === 'monthly') opt.textContent = 'Monthly on day ' + monthDay;
+    if (opt.value === 'yearly') opt.textContent = 'Yearly on ' + monthName + ' ' + monthDay;
+  }
+}
+
+function _ruleToPreset(rule) {
+  if (!rule) return 'none';
+  if (rule.frequency === 'daily' && (rule.interval || 1) === 1) return 'daily';
+  if (rule.frequency === 'weekly' && (rule.interval || 1) === 1) {
+    if (rule.weekdays && rule.weekdays.length === 5 &&
+        [0,1,2,3,4].every(d => rule.weekdays.includes(d))) return 'weekdays';
+    if (!rule.weekdays || rule.weekdays.length <= 1) return 'weekly';
+  }
+  if (rule.frequency === 'monthly' && (rule.interval || 1) === 1) return 'monthly';
+  if (rule.frequency === 'yearly' && (rule.interval || 1) === 1) return 'yearly';
+  return 'custom';
+}
+
 function openDateEditor(taskId) {
   const task = state.tasks.find(t => t.id === taskId);
   if (!task) return;
@@ -2501,45 +2525,67 @@ function openDateEditor(taskId) {
   $('date-editor-start').value = toLocalDatetimeStr(task.scheduled_start);
   $('date-editor-end').value = toLocalDatetimeStr(task.scheduled_end);
 
-  // Parse recurrence rule
-  let rule = null;
-  if (task.recurrence_rule) {
-    try { rule = typeof task.recurrence_rule === 'string' ? JSON.parse(task.recurrence_rule) : task.recurrence_rule; } catch {}
+  // Hide recurrence editing for GCal-sourced tasks
+  const gcalSourced = task.is_gcal_sourced || (task.recurrence_source_id && (state.tasks.find(t => t.id === task.recurrence_source_id) || {}).is_gcal_sourced);
+  const recurrenceSection = document.querySelector('.date-editor-recurrence');
+  recurrenceSection.style.display = gcalSourced ? 'none' : '';
+  let gcalNotice = document.getElementById('gcal-recurrence-notice');
+  if (gcalSourced) {
+    if (!gcalNotice) {
+      gcalNotice = document.createElement('div');
+      gcalNotice.id = 'gcal-recurrence-notice';
+      gcalNotice.className = 'gcal-recurrence-notice';
+      gcalNotice.textContent = 'Recurrence managed by Google Calendar';
+      recurrenceSection.parentNode.insertBefore(gcalNotice, recurrenceSection.nextSibling);
+    }
+    gcalNotice.style.display = '';
+  } else if (gcalNotice) {
+    gcalNotice.style.display = 'none';
   }
 
-  const repeatCheck = $('date-editor-repeat');
-  repeatCheck.checked = !!rule;
-  $('recurrence-options').classList.toggle('show', !!rule);
+  // Update preset labels based on task date
+  const taskDate = task.scheduled_start ? new Date(task.scheduled_start) : new Date();
+  _updatePresetLabels(taskDate);
 
-  if (rule) {
-    $('recurrence-freq').value = rule.frequency || 'daily';
+  // Parse recurrence rule (for instances, inherit from source task for display)
+  let rule = null;
+  const ruleRaw = task.recurrence_rule
+    || (task.recurrence_source_id && (state.tasks.find(t => t.id === task.recurrence_source_id) || {}).recurrence_rule);
+  if (ruleRaw) {
+    try { rule = typeof ruleRaw === 'string' ? JSON.parse(ruleRaw) : ruleRaw; } catch {}
+  }
+
+  const preset = _ruleToPreset(rule);
+  $('recurrence-preset').value = preset;
+  _onPresetChange(preset, rule);
+
+  $('date-editor-popup').classList.add('show');
+}
+
+function _onPresetChange(preset, rule) {
+  const isCustom = preset === 'custom';
+  $('recurrence-custom').classList.toggle('show', isCustom);
+
+  if (isCustom && rule) {
+    $('recurrence-freq').value = rule.frequency || 'weekly';
     $('recurrence-interval').value = rule.interval || 1;
-    updateRecurrenceUI(rule.frequency || 'daily');
-
-    // Weekdays
+    _updateCustomUI(rule.frequency || 'weekly');
     document.querySelectorAll('.weekday-btn').forEach(btn => {
       const day = parseInt(btn.dataset.day);
       btn.classList.toggle('active', rule.weekdays ? rule.weekdays.includes(day) : false);
     });
-
-    // Monthly day
-    if (rule.monthDay) $('recurrence-monthday').value = rule.monthDay;
-
-    // End condition
     $('recurrence-end-type').value = rule.endType || 'never';
-    updateRecurrenceEndUI(rule.endType || 'never');
+    _updateEndUI(rule.endType || 'never');
     if (rule.endDate) $('recurrence-end-date').value = rule.endDate;
     if (rule.endCount) $('recurrence-end-count').value = rule.endCount;
-  } else {
-    $('recurrence-freq').value = 'daily';
+  } else if (isCustom) {
+    $('recurrence-freq').value = 'weekly';
     $('recurrence-interval').value = 1;
-    updateRecurrenceUI('daily');
+    _updateCustomUI('weekly');
     document.querySelectorAll('.weekday-btn').forEach(btn => btn.classList.remove('active'));
     $('recurrence-end-type').value = 'never';
-    updateRecurrenceEndUI('never');
+    _updateEndUI('never');
   }
-
-  $('date-editor-popup').classList.add('show');
 }
 
 function closeDateEditor() {
@@ -2547,42 +2593,47 @@ function closeDateEditor() {
   _dateEditorTaskId = null;
 }
 
-function updateRecurrenceUI(freq) {
+function _updateCustomUI(freq) {
   $('recurrence-weekdays').classList.toggle('show', freq === 'weekly');
-  $('recurrence-monthly').classList.toggle('show', freq === 'monthly');
 }
 
-function updateRecurrenceEndUI(endType) {
+function _updateEndUI(endType) {
   $('recurrence-end-date').style.display = endType === 'date' ? '' : 'none';
   $('recurrence-end-count').style.display = endType === 'count' ? '' : 'none';
 }
 
 function buildRecurrenceRule() {
-  if (!$('date-editor-repeat').checked) return null;
+  const preset = $('recurrence-preset').value;
+  if (preset === 'none') return null;
+
+  // Get task date for context
+  const startVal = $('date-editor-start').value;
+  const d = startVal ? new Date(startVal) : new Date();
+  const wd = d.getDay();
+  const wdIdx = wd === 0 ? 6 : wd - 1; // 0=Mon..6=Sun
+
+  if (preset === 'daily') return { frequency: 'daily', interval: 1, endType: 'never' };
+  if (preset === 'weekly') return { frequency: 'weekly', interval: 1, weekdays: [wdIdx], endType: 'never' };
+  if (preset === 'monthly') return { frequency: 'monthly', interval: 1, monthDay: d.getDate(), endType: 'never' };
+  if (preset === 'yearly') return { frequency: 'yearly', interval: 1, endType: 'never' };
+  if (preset === 'weekdays') return { frequency: 'weekly', interval: 1, weekdays: [0,1,2,3,4], endType: 'never' };
+
+  // Custom
   const freq = $('recurrence-freq').value;
   const rule = {
     frequency: freq,
     interval: parseInt($('recurrence-interval').value) || 1,
     endType: $('recurrence-end-type').value
   };
-
   if (freq === 'weekly') {
     rule.weekdays = [];
     document.querySelectorAll('.weekday-btn.active').forEach(btn => {
       rule.weekdays.push(parseInt(btn.dataset.day));
     });
   }
-
-  if (freq === 'monthly') {
-    rule.monthDay = parseInt($('recurrence-monthday').value) || 1;
-  }
-
-  if (rule.endType === 'date') {
-    rule.endDate = $('recurrence-end-date').value || null;
-  } else if (rule.endType === 'count') {
-    rule.endCount = parseInt($('recurrence-end-count').value) || 10;
-  }
-
+  if (freq === 'monthly') rule.monthDay = d.getDate();
+  if (rule.endType === 'date') rule.endDate = $('recurrence-end-date').value || null;
+  else if (rule.endType === 'count') rule.endCount = parseInt($('recurrence-end-count').value) || 10;
   return rule;
 }
 
@@ -2597,25 +2648,27 @@ async function saveDateEditor() {
   const scheduled_end = endVal ? new Date(endVal).toISOString() : null;
   const recurrence_rule = buildRecurrenceRule();
 
+  // Instance with recurrence removed → detach from series
+  const isInstance = !!task.recurrence_source_id;
+  const wasRecurring = !!(task.recurrence_rule || task.recurrence_source_id);
+  const removedRecurrence = wasRecurring && !recurrence_rule;
+
+  const body = { text: task.text, scheduled_start, scheduled_end, recurrence_rule };
+  if (isInstance && removedRecurrence) {
+    body.detach_from_series = true;
+  }
+
   const result = await api(`/api/tasks/${_dateEditorTaskId}`, {
     method: 'PUT',
-    body: JSON.stringify({
-      text: task.text,
-      scheduled_start,
-      scheduled_end,
-      recurrence_rule
-    })
+    body: JSON.stringify(body)
   });
 
   if (result && result.success) {
-    if (scheduled_start !== null) task.scheduled_start = scheduled_start;
-    if (scheduled_end !== null) task.scheduled_end = scheduled_end;
-    task.recurrence_rule = recurrence_rule ? JSON.stringify(recurrence_rule) : null;
-    renderTasks();
-    updateUI();
+    closeDateEditor();
+    await loadState();
+  } else {
+    closeDateEditor();
   }
-
-  closeDateEditor();
 }
 
 // Wire date editor events
@@ -2631,20 +2684,89 @@ async function saveDateEditor() {
     if (e.key === 'Escape' && $('date-editor-popup').classList.contains('show')) closeDateEditor();
   });
 
-  $('date-editor-repeat').onchange = () => {
-    $('recurrence-options').classList.toggle('show', $('date-editor-repeat').checked);
-  };
+  $('recurrence-preset').onchange = () => _onPresetChange($('recurrence-preset').value, null);
+  $('recurrence-freq').onchange = () => _updateCustomUI($('recurrence-freq').value);
+  $('recurrence-end-type').onchange = () => _updateEndUI($('recurrence-end-type').value);
 
-  $('recurrence-freq').onchange = () => updateRecurrenceUI($('recurrence-freq').value);
-  $('recurrence-end-type').onchange = () => updateRecurrenceEndUI($('recurrence-end-type').value);
+  // Update preset labels when start date changes
+  $('date-editor-start').onchange = () => {
+    const v = $('date-editor-start').value;
+    if (v) _updatePresetLabels(new Date(v));
+  };
 
   document.querySelectorAll('.weekday-btn').forEach(btn => {
     btn.onclick = () => btn.classList.toggle('active');
   });
 })();
 
+// ========== RECURRENCE CHOICE DIALOG ==========
+let _recurrenceChoiceResolve = null;
+
+function _isRecurring(task) {
+  return !!(task.recurrence_rule || task.recurrence_source_id);
+}
+
+function _getSourceTaskId(task) {
+  return task.recurrence_source_id || task.id;
+}
+
+function _showRecurrenceChoice() {
+  return new Promise(resolve => {
+    _recurrenceChoiceResolve = resolve;
+    $('recurrence-choice-popup').classList.add('show');
+  });
+}
+
+function _closeRecurrenceChoice(result) {
+  $('recurrence-choice-popup').classList.remove('show');
+  if (_recurrenceChoiceResolve) {
+    _recurrenceChoiceResolve(result || null);
+    _recurrenceChoiceResolve = null;
+  }
+}
+
+function _handleRecurringAction(taskId, li, action) {
+  const task = state.tasks.find(t => t.id === taskId);
+  if (!task) return;
+
+  if (!_isRecurring(task)) {
+    // Not recurring — do action directly
+    if (action === 'edit') openDateEditor(taskId);
+    else if (action === 'delete') deleteTask(taskId, li);
+    return;
+  }
+
+  _showRecurrenceChoice().then(choice => {
+    if (!choice) return;
+    if (choice === 'this') {
+      if (action === 'edit') openDateEditor(taskId);
+      else if (action === 'delete') deleteTask(taskId, li);
+    } else if (choice === 'all') {
+      const sourceId = _getSourceTaskId(task);
+      if (action === 'edit') openDateEditor(sourceId);
+      else if (action === 'delete') {
+        const sourceLi = document.querySelector(`[data-id="${sourceId}"]`) || li;
+        deleteTask(sourceId, sourceLi);
+      }
+    }
+  });
+}
+
+(function initRecurrenceChoice() {
+  $('recurrence-choice-close').onclick = () => _closeRecurrenceChoice(null);
+  $('recurrence-choice-this').onclick = () => _closeRecurrenceChoice('this');
+  $('recurrence-choice-all').onclick = () => _closeRecurrenceChoice('all');
+
+  $('recurrence-choice-popup').addEventListener('click', (e) => {
+    if (e.target === $('recurrence-choice-popup')) _closeRecurrenceChoice(null);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && $('recurrence-choice-popup').classList.contains('show')) _closeRecurrenceChoice(null);
+  });
+})();
+
 // Stop auto-refresh on page unload
 window.addEventListener('beforeunload', () => {
   if (refreshTimer) clearInterval(refreshTimer);
-  if (_devPollTimer) clearInterval(_devPollTimer);
 });

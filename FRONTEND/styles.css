@@ -468,6 +468,14 @@ body {
   &.task-done .task-time-icon { opacity: 0.45; }
   &.task-done .task-dates { opacity: 0.45; }
 
+  .task-magic {
+    width: 20px; height: 20px; flex-shrink: 0;
+    background: transparent; border: 1.5px solid var(--border-color); border-radius: 50%;
+    font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    padding: 0; line-height: 1; transition: all var(--transition-fast);
+    &:hover { border-color: #c084fc; }
+  }
+
   .task-add-sub {
     width: 20px; height: 20px; flex-shrink: 0;
     background: transparent; border: 1.5px solid var(--border-color); border-radius: 50%;
@@ -505,6 +513,12 @@ body {
   }
   .task-dates.has-recurrence {
     border-color: gold;
+  }
+  .task-dates.gcal-sourced {
+    border-color: #4285f4;
+  }
+  .gcal-recurrence-notice {
+    font-size: 0.75rem; color: #4285f4; padding: 4px 0; opacity: 0.85;
   }
 
   .task-date {
@@ -1291,6 +1305,45 @@ body {
   object-fit: cover;
 }
 
+/* ===== RECURRENCE CHOICE DIALOG ===== */
+.recurrence-choice-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex; align-items: center; justify-content: center;
+  z-index: var(--z-popup);
+  opacity: 0; visibility: hidden;
+  transition: opacity 0.3s, visibility 0.3s;
+}
+.recurrence-choice-overlay.show { opacity: 1; visibility: visible; }
+
+.recurrence-choice-content {
+  background: var(--bg-secondary); border-radius: 16px;
+  padding: 20px; min-width: 260px; max-width: 90vw; width: 300px;
+  transform: scale(0.9); transition: transform 0.3s;
+}
+.recurrence-choice-overlay.show .recurrence-choice-content { transform: scale(1); }
+
+.recurrence-choice-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 16px; font-weight: 600; font-size: 1rem; color: var(--text-primary);
+}
+.recurrence-choice-close {
+  background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary);
+}
+
+.recurrence-choice-buttons { display: flex; flex-direction: column; gap: 8px; }
+
+.recurrence-choice-btn {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; padding: 12px 16px;
+  background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px;
+  color: var(--text-primary); font-size: 0.9rem;
+  cursor: pointer; transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+.recurrence-choice-btn:hover { border-color: var(--accent-primary); background: rgba(108, 92, 231, 0.1); }
+.recurrence-choice-btn .rcb-icon { font-size: 1.2rem; }
+.recurrence-choice-btn .rcb-label { font-weight: 500; }
+
 /* ===== DATE EDITOR POPUP ===== */
 .date-editor-overlay {
   position: fixed; inset: 0;
@@ -1340,21 +1393,19 @@ body {
 
 .date-editor-recurrence { margin-bottom: 16px; }
 
-.date-editor-repeat-toggle {
-  display: flex; align-items: center; gap: 8px; cursor: pointer;
-  font-size: 0.85rem; color: var(--text-primary); margin-bottom: 10px;
-
-  input[type="checkbox"] {
-    width: 18px; height: 18px; accent-color: var(--accent-primary); cursor: pointer;
-  }
-}
-
-.recurrence-options {
+.recurrence-custom {
   display: none; flex-direction: column; gap: 10px;
-  padding: 12px; background: var(--bg-card); border-radius: 10px;
+  padding: 12px; margin-top: 10px;
+  background: var(--bg-card); border-radius: 10px;
   border: 1px solid var(--border-color);
 }
-.recurrence-options.show { display: flex; }
+.recurrence-custom.show { display: flex; }
+
+.recurrence-every-row {
+  display: flex; gap: 8px;
+  input { width: 60px; }
+  select { flex: 1; }
+}
 
 .recurrence-weekdays {
   display: none; flex-wrap: wrap; gap: 6px;
@@ -1370,9 +1421,6 @@ body {
   &:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
   &.active { background: var(--accent-primary); border-color: var(--accent-primary); color: white; }
 }
-
-.recurrence-monthly { display: none; }
-.recurrence-monthly.show { display: block; }
 
 .recurrence-end-section { display: flex; flex-direction: column; gap: 8px; }
 .recurrence-end-field {

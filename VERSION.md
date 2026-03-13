@@ -28,7 +28,7 @@ python run.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.55 - added repeated tasks as data yellow border"
+git commit -m "v0.0.56 - added sync between google calendar and table tasks"
 git push
 python run.py
 
@@ -49,3 +49,5 @@ v0.0.52 - code refactoring
 v0.0.53 - mobile design
 v0.0.54 - added 5 sub tasks
 v0.0.55 - added repeated tasks as data yellow border
+v0.0.56 - added sync between google calendar and table tasks
+
