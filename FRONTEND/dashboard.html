@@ -9,7 +9,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}?v={{ app_version }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}?v={{ app_version }}&t={{ cache_bust }}">
 </head>
 <body data-drum-row-height="{{ drum_row_height }}" data-drum-max-top-angle="{{ drum_max_top_angle }}" data-drum-perspective-k="{{ drum_perspective_k }}" data-drum-highlight-offset="{{ drum_highlight_offset }}">
     <a href="#tasks-list" class="skip-to-content">Skip to tasks</a>
@@ -74,33 +74,6 @@
                     </div>
                     <div class="settings-divider"></div>
 
-                    <!-- Add task form -->
-                    <form class="add-task-form" id="add-task-form" role="form" aria-label="Add new quest">
-                        <div class="input-wrapper">
-                            <textarea
-                                id="task-input"
-                                placeholder="New quest..."
-                                autocomplete="off"
-                                rows="1"
-                            ></textarea>
-                            <button type="button" class="schedule-toggle-btn" id="schedule-toggle" aria-label="Set schedule" title="Set schedule">&#128197;</button>
-                            <button type="submit" class="add-btn" id="add-btn">
-                                <span class="btn-icon">+</span>
-                            </button>
-                        </div>
-                        <div class="schedule-fields" id="schedule-fields" style="display:none;">
-                            <label class="schedule-label">
-                                <span>Start</span>
-                                <input type="datetime-local" id="schedule-start">
-                            </label>
-                            <label class="schedule-label">
-                                <span>Deadline</span>
-                                <input type="datetime-local" id="schedule-end">
-                            </label>
-                        </div>
-                    </form>
-                    <div class="settings-divider"></div>
-
                     <!-- Tabs -->
                     <button class="settings-item tab-btn active" data-tab="todo" role="tab" aria-selected="true" aria-controls="tab-todo">
                         <span>&#128203;</span>
@@ -136,13 +109,19 @@
                                 <span class="settings-label">Google Calendar</span>
                                 <span class="settings-status" id="gcal-status">OFF</span>
                             </button>
+                            <div class="settings-divider"></div>
+                            <button class="settings-item" id="drum-view-toggle">
+                                <span>&#127922;</span>
+                                <span class="settings-label">Drum</span>
+                                <span class="settings-status" id="drum-view-status">ON</span>
+                            </button>
                         </div>
                     </div>
                     <div class="settings-divider"></div>
                     <button class="settings-item" id="version-btn">
                         <span>&#128736;</span>
                         <span class="settings-label">Version</span>
-                        <span class="settings-status">{{ version }}</span>
+                        <span class="version-badge">{{ version }}</span>
                     </button>
                     <div class="settings-divider"></div>
                     <a href="/logout" class="settings-item settings-logout">
@@ -152,7 +131,7 @@
                 </div>
             </div>
         </div>
-        <div class="quick-add-row" id="quick-add-row" style="display: none;">
+        <div class="quick-add-row" id="quick-add-row">
             <textarea id="quick-task-input" placeholder="New quest..." autocomplete="off" rows="1"></textarea>
             <button type="button" class="quick-add-submit" id="quick-add-submit">Add</button>
         </div>
@@ -235,7 +214,7 @@
                         <span>&#128101;</span> Friends Feed
                     </h3>
                     <div class="social-feed" id="friends-feed"></div>
-                    <button class="load-more-btn" id="load-more-feed" style="display: none;">
+                    <button class="load-more-btn" id="load-more-feed">
                         Load more
                     </button>
                 </div>
@@ -304,6 +283,75 @@
             </div>
         </div>
 
+        <!-- Date Editor Popup -->
+        <div id="date-editor-popup" class="date-editor-overlay" role="dialog" aria-label="Edit dates">
+            <div class="date-editor-content">
+                <div class="date-editor-header">
+                    <span>Edit Dates</span>
+                    <button class="date-editor-close" id="date-editor-close" aria-label="Close">&times;</button>
+                </div>
+                <div class="date-editor-fields">
+                    <label class="date-editor-label">
+                        <span>Start</span>
+                        <input type="datetime-local" id="date-editor-start">
+                    </label>
+                    <label class="date-editor-label">
+                        <span>End</span>
+                        <input type="datetime-local" id="date-editor-end">
+                    </label>
+                </div>
+                <div class="date-editor-recurrence">
+                    <label class="date-editor-repeat-toggle">
+                        <input type="checkbox" id="date-editor-repeat">
+                        <span>Repeats</span>
+                    </label>
+                    <div class="recurrence-options" id="recurrence-options">
+                        <label class="date-editor-label">
+                            <span>Frequency</span>
+                            <select id="recurrence-freq">
+                                <option value="daily">Daily</option>
+                                <option value="weekly">Weekly</option>
+                                <option value="monthly">Monthly</option>
+                                <option value="yearly">Yearly</option>
+                            </select>
+                        </label>
+                        <label class="date-editor-label">
+                            <span>Every</span>
+                            <input type="number" id="recurrence-interval" min="1" max="99" value="1">
+                        </label>
+                        <div class="recurrence-weekdays" id="recurrence-weekdays">
+                            <button type="button" class="weekday-btn" data-day="0">Mo</button>
+                            <button type="button" class="weekday-btn" data-day="1">Tu</button>
+                            <button type="button" class="weekday-btn" data-day="2">We</button>
+                            <button type="button" class="weekday-btn" data-day="3">Th</button>
+                            <button type="button" class="weekday-btn" data-day="4">Fr</button>
+                            <button type="button" class="weekday-btn" data-day="5">Sa</button>
+                            <button type="button" class="weekday-btn" data-day="6">Su</button>
+                        </div>
+                        <div class="recurrence-monthly" id="recurrence-monthly">
+                            <label class="date-editor-label">
+                                <span>On day</span>
+                                <input type="number" id="recurrence-monthday" min="1" max="31" value="1">
+                            </label>
+                        </div>
+                        <div class="recurrence-end-section">
+                            <label class="date-editor-label">
+                                <span>Ends</span>
+                                <select id="recurrence-end-type">
+                                    <option value="never">Never</option>
+                                    <option value="date">On date</option>
+                                    <option value="count">After N times</option>
+                                </select>
+                            </label>
+                            <input type="date" id="recurrence-end-date" class="recurrence-end-field" style="display:none">
+                            <input type="number" id="recurrence-end-count" class="recurrence-end-field" min="1" max="999" value="10" style="display:none">
+                        </div>
+                    </div>
+                </div>
+                <button class="date-editor-save" id="date-editor-save">Save</button>
+            </div>
+        </div>
+
         <!-- Lightbox for social feed media -->
         <div id="social-lightbox" class="social-lightbox">
             <div class="social-lightbox-content" id="social-lightbox-content"></div>
@@ -311,6 +359,6 @@
 
     </div>
 
-<script src="{{ url_for('static', path='app.js') }}?v={{ app_version }}"></script>
+<script src="{{ url_for('static', path='app.js') }}?v={{ app_version }}&t={{ cache_bust }}"></script>
 </body>
 </html>

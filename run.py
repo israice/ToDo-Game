@@ -67,11 +67,15 @@ GOOGLE_CALENDAR_ENABLED = bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
 APP_URL = os.environ.get("APP_URL", "")  # Public HTTPS URL for Google Calendar webhooks
 INSTANCE_ROLE = os.environ.get("INSTANCE_ROLE", DEFAULT_INSTANCE_ROLE)  # "primary" or "replica"
 
+# Override Google redirect URI for local development
+if INSTANCE_ROLE == "replica" and GOOGLE_REDIRECT_URI:
+    GOOGLE_REDIRECT_URI = f"http://localhost:{PORT}/auth/google/callback"
+
 # Media uploads configuration
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'DATA', 'UPLOADS')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4', 'webm', 'mov'}
-MAX_TASK_TEXT_LENGTH = 500
+MAX_TASK_TEXT_LENGTH = 2000
 
 # CSRF
 csrf_serializer = URLSafeTimedSerializer(SECRET_KEY)
@@ -161,7 +165,7 @@ def init_db():
                 id INTEGER PRIMARY KEY, user_id INTEGER UNIQUE NOT NULL,
                 level INTEGER DEFAULT 1, xp INTEGER DEFAULT 0, xp_max INTEGER DEFAULT 100,
                 completed_tasks INTEGER DEFAULT 0, current_streak INTEGER DEFAULT 0,
-                combo INTEGER DEFAULT 0, last_completion_date TEXT, sound_enabled INTEGER DEFAULT 0,
+                combo INTEGER DEFAULT 0, last_completion_date TEXT, sound_enabled INTEGER DEFAULT 0, drum_view INTEGER DEFAULT 1,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE);
             CREATE TABLE IF NOT EXISTS user_achievements (
                 id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, achievement_id TEXT NOT NULL,
@@ -204,7 +208,7 @@ def init_db():
         # Google Calendar migration: add schedule columns to tasks
         cursor = conn.execute("PRAGMA table_info(tasks)")
         existing_cols = {row[1] for row in cursor.fetchall()}
-        for col in ['scheduled_start', 'scheduled_end', 'google_event_id', 'completed_at', 'parent_id']:
+        for col in ['scheduled_start', 'scheduled_end', 'google_event_id', 'completed_at', 'parent_id', 'recurrence_rule']:
             if col not in existing_cols:
                 conn.execute(f'ALTER TABLE tasks ADD COLUMN {col} TEXT')
 
@@ -227,6 +231,12 @@ def init_db():
         for col in ['watch_channel_id', 'watch_resource_id', 'watch_expiration']:
             if col not in gt_cols:
                 conn.execute(f'ALTER TABLE google_tokens ADD COLUMN {col} TEXT')
+
+        # Migrate user_progress: add drum_view column
+        up_cursor = conn.execute("PRAGMA table_info(user_progress)")
+        up_cols = {row[1] for row in up_cursor.fetchall()}
+        if 'drum_view' not in up_cols:
+            conn.execute('ALTER TABLE user_progress ADD COLUMN drum_view INTEGER DEFAULT 1')
 
         # Migrate activity_log: add task_id column
         al_cursor = conn.execute("PRAGMA table_info(activity_log)")
@@ -280,7 +290,7 @@ def get_or_create_progress(conn, user_id):
     if not progress:
         conn.execute('INSERT INTO user_progress (user_id) VALUES (?)', (user_id,))
         conn.commit()
-        return {'level': 1, 'xp': 0, 'xp_max': 100, 'completed_tasks': 0, 'current_streak': 0, 'combo': 0, 'sound_enabled': 0}
+        return {'level': 1, 'xp': 0, 'xp_max': 100, 'completed_tasks': 0, 'current_streak': 0, 'combo': 0, 'sound_enabled': 0, 'drum_view': 1}
     return dict(progress)
 
 def apply_xp(progress, xp_amount):
@@ -555,14 +565,20 @@ async def api_get_state(user_id: int = Depends(get_authenticated_user)):
                      for m in conn.execute('SELECT task_id, media_type, filename FROM task_media WHERE user_id = ?', (user_id,))}
         tasks = [{'id': t['id'], 'text': t['text'], 'xp': t['xp_reward'], 'media': media_map.get(t['id']),
                   'scheduled_start': t['scheduled_start'], 'scheduled_end': t['scheduled_end'],
-                  'completed_at': t['completed_at'], 'parent_id': t['parent_id']}
-                 for t in conn.execute('SELECT id, text, xp_reward, scheduled_start, scheduled_end, completed_at, parent_id FROM tasks WHERE user_id = ? ORDER BY created_at DESC', (user_id,))]
+                  'completed_at': t['completed_at'], 'parent_id': t['parent_id'],
+                  'recurrence_rule': t['recurrence_rule']}
+                 for t in conn.execute('SELECT id, text, xp_reward, scheduled_start, scheduled_end, completed_at, parent_id, recurrence_rule FROM tasks WHERE user_id = ? ORDER BY created_at DESC', (user_id,))]
         achievements = {a['achievement_id']: True for a in conn.execute('SELECT achievement_id FROM user_achievements WHERE user_id = ?', (user_id,))}
-        return JSONResponse({
+        result = {
             'tasks': tasks, 'level': progress['level'], 'xp': progress['xp'], 'xpMax': progress['xp_max'],
             'completed': progress['completed_tasks'], 'streak': progress['current_streak'],
-            'combo': progress['combo'], 'achievements': achievements, 'sound': bool(progress['sound_enabled'])
-        })
+            'combo': progress['combo'], 'achievements': achievements, 'sound': bool(progress['sound_enabled']),
+            'drumView': bool(progress.get('drum_view', 1))
+        }
+        if APP_DEBUG:
+            css_hash, other_hash = _compute_files_hash()
+            result['_devHash'] = {'css': css_hash, 'other': other_hash}
+        return JSONResponse(result)
 
 @app.put('/api/settings')
 async def api_update_settings(request: Request, user_id: int = Depends(get_authenticated_user)):
@@ -570,7 +586,9 @@ async def api_update_settings(request: Request, user_id: int = Depends(get_authe
     with get_db() as conn:
         if 'sound' in data:
             conn.execute('UPDATE user_progress SET sound_enabled = ? WHERE user_id = ?', (1 if data['sound'] else 0, user_id))
-            conn.commit()
+        if 'drumView' in data:
+            conn.execute('UPDATE user_progress SET drum_view = ? WHERE user_id = ?', (1 if data['drumView'] else 0, user_id))
+        conn.commit()
     return JSONResponse({'success': True})
 
 @app.post('/api/tasks')
@@ -582,6 +600,9 @@ async def api_create_task(request: Request, user_id: int = Depends(get_authentic
     scheduled_start = data.get('scheduled_start') or None
     scheduled_end = data.get('scheduled_end') or None
     parent_id = data.get('parent_id') or None
+    recurrence_rule = data.get('recurrence_rule') or None
+    if recurrence_rule and isinstance(recurrence_rule, dict):
+        recurrence_rule = json.dumps(recurrence_rule)
 
     google_event_id = None
     with get_db() as conn:
@@ -591,8 +612,8 @@ async def api_create_task(request: Request, user_id: int = Depends(get_authentic
             if not parent:
                 return error_response('Parent task not found', 404)
 
-        conn.execute('INSERT INTO tasks (id, user_id, text, xp_reward, scheduled_start, scheduled_end, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                     (task_id, user_id, text, xp, scheduled_start, scheduled_end, parent_id))
+        conn.execute('INSERT INTO tasks (id, user_id, text, xp_reward, scheduled_start, scheduled_end, parent_id, recurrence_rule) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                     (task_id, user_id, text, xp, scheduled_start, scheduled_end, parent_id, recurrence_rule))
         progress = get_or_create_progress(conn, user_id)
         new_xp, new_level, new_xp_max, leveled_up = apply_xp(progress, 3)
         conn.execute('UPDATE user_progress SET xp=?, level=?, xp_max=? WHERE user_id=?',
@@ -619,7 +640,7 @@ async def api_create_task(request: Request, user_id: int = Depends(get_authentic
     return JSONResponse({
         'id': task_id, 'text': text, 'xp': xp,
         'scheduled_start': scheduled_start, 'scheduled_end': scheduled_end,
-        'parent_id': parent_id,
+        'parent_id': parent_id, 'recurrence_rule': recurrence_rule,
         'xpEarned': 3, 'level': new_level, 'currentXp': new_xp, 'xpMax': new_xp_max, 'leveledUp': leveled_up
     })
 
@@ -630,6 +651,9 @@ async def api_update_task(task_id: str, request: Request, user_id: int = Depends
     if err: return err
     scheduled_start = data.get('scheduled_start')
     scheduled_end = data.get('scheduled_end')
+    recurrence_rule = data.get('recurrence_rule')
+    if recurrence_rule is not None and isinstance(recurrence_rule, dict):
+        recurrence_rule = json.dumps(recurrence_rule)
 
     with get_db() as conn:
         # Build dynamic update
@@ -641,6 +665,9 @@ async def api_update_task(task_id: str, request: Request, user_id: int = Depends
         if scheduled_end is not None:
             updates.append('scheduled_end = ?')
             params.append(scheduled_end or None)
+        if recurrence_rule is not None:
+            updates.append('recurrence_rule = ?')
+            params.append(recurrence_rule or None)
         params.extend([task_id, user_id])
         conn.execute(f'UPDATE tasks SET {", ".join(updates)} WHERE id = ? AND user_id = ?', params)
 
@@ -663,6 +690,8 @@ async def api_update_task(task_id: str, request: Request, user_id: int = Depends
         event_data['scheduled_start'] = scheduled_start or None
     if scheduled_end is not None:
         event_data['scheduled_end'] = scheduled_end or None
+    if recurrence_rule is not None:
+        event_data['recurrence_rule'] = recurrence_rule or None
     return JSONResponse({'success': True})
 
 @app.delete('/api/tasks/{task_id}')
@@ -1151,6 +1180,9 @@ async def api_friends_feed(request: Request, user_id: int = Depends(get_authenti
 
 # ============== Google Calendar OAuth ==============
 
+# In-memory store for PKCE code verifiers (session cookies too small)
+_pkce_verifiers = {}
+
 def _google_client_config():
     return {'web': {
         'client_id': GOOGLE_CLIENT_ID,
@@ -1175,8 +1207,8 @@ async def google_connect(request: Request, user_id: int = Depends(get_authentica
         prompt='consent',
         state=str(user_id),
     )
-    # Save code_verifier in session for PKCE
-    request.session['google_code_verifier'] = flow.code_verifier
+    # Save code_verifier in memory for PKCE (cookie too small for 128-char verifier)
+    _pkce_verifiers[user_id] = flow.code_verifier
     return RedirectResponse(auth_url)
 
 @app.get('/auth/google/callback')
@@ -1198,8 +1230,8 @@ async def google_callback(request: Request):
         scopes=['https://www.googleapis.com/auth/calendar'],
         redirect_uri=GOOGLE_REDIRECT_URI,
     )
-    # Restore code_verifier from session for PKCE
-    flow.code_verifier = request.session.pop('google_code_verifier', None)
+    # Restore code_verifier from memory for PKCE
+    flow.code_verifier = _pkce_verifiers.pop(user_id, None)
     flow.fetch_token(code=code)
     creds = flow.credentials
 
@@ -1609,6 +1641,8 @@ templates.env.globals['drum_row_height'] = DRUM_ROW_HEIGHT
 templates.env.globals['drum_max_top_angle'] = DRUM_MAX_TOP_ANGLE
 templates.env.globals['drum_perspective_k'] = DRUM_PERSPECTIVE_K
 templates.env.globals['drum_highlight_offset'] = DRUM_HIGHLIGHT_OFFSET
+import time as _time
+templates.env.globals['cache_bust'] = str(int(_time.time()))
 
 # Static files (must be after all routes)
 app.mount('/static', StaticFiles(directory='FRONTEND'), name='static')

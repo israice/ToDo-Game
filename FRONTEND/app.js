@@ -14,7 +14,7 @@ const DEBOUNCE_DELAY_MS = 300;
 // ========== STATE ==========
 let state = {
   tasks: [], level: 1, xp: 0, xpMax: 100, combo: 0, completed: 0,
-  achievements: {}, streak: 0, sound: false
+  achievements: {}, streak: 0, sound: false, drumView: true
 };
 let comboTimer = null;
 let audioCtx = null;
@@ -134,6 +134,175 @@ function createDateSpan(dateData, extraClass = '') {
   span.appendChild(dayEl);
   span.appendChild(timeEl);
   return span;
+}
+
+// ========== SHARED DOM BUILDERS ==========
+
+function createMediaSpan(task) {
+  const mediaSpan = document.createElement('span');
+  mediaSpan.className = 'task-media' + (task.media ? ' has-image' : '');
+  if (task.media) {
+    const mediaEl = task.media.type === 'image' ? document.createElement('img') : document.createElement('video');
+    mediaEl.src = task.media.url;
+    if (task.media.type === 'image') mediaEl.alt = '';
+    else mediaEl.muted = true;
+    mediaSpan.appendChild(mediaEl);
+  } else {
+    mediaSpan.textContent = '\uD83D\uDDBC\uFE0F';
+  }
+  return mediaSpan;
+}
+
+function buildCheckbox(task, li) {
+  const isCompleted = !!task.completed_at;
+  const checkLabel = document.createElement('label');
+  checkLabel.className = 'task-checkbox';
+  if (isCompleted) {
+    checkLabel.classList.add('task-completed-icon');
+    const completedSpan = document.createElement('span');
+    completedSpan.className = 'checkbox-completed';
+    completedSpan.textContent = '\u2705';
+    checkLabel.appendChild(completedSpan);
+    li.classList.add('task-done');
+  } else {
+    const checkInput = document.createElement('input');
+    checkInput.type = 'checkbox';
+    checkInput.setAttribute('aria-label', 'Complete quest');
+    const checkCustom = document.createElement('span');
+    checkCustom.className = 'checkbox-custom';
+    checkLabel.appendChild(checkInput);
+    checkLabel.appendChild(checkCustom);
+    li.classList.remove('task-done');
+  }
+  return checkLabel;
+}
+
+function buildTaskElements(task, depth) {
+  const hour = getHourFromISO(task.scheduled_start);
+  const { cls: timePeriod, icon: timeIconText } = getTimePeriodInfo(hour);
+
+  const mediaSpan = createMediaSpan(task);
+
+  const textSpan = document.createElement('span');
+  textSpan.className = 'task-text';
+  textSpan.dir = 'auto';
+  textSpan.textContent = task.text;
+
+  const start = formatTaskDate(task.scheduled_start);
+  const end = formatTaskDate(task.scheduled_end);
+  const sameDate = start.day && end.day && start.day === end.day && start.time === end.time;
+  const startDateSpan = createDateSpan(start, sameDate ? 'task-date-same' : 'task-date-start');
+  const endDateSpan = createDateSpan(end, sameDate ? 'task-date-same' : 'task-date-end');
+  const datesWrapper = document.createElement('div');
+  datesWrapper.className = 'task-dates';
+  if (task.recurrence_rule) datesWrapper.classList.add('has-recurrence');
+  datesWrapper.appendChild(startDateSpan);
+  datesWrapper.appendChild(endDateSpan);
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'task-delete';
+  deleteBtn.setAttribute('aria-label', 'Delete quest');
+  deleteBtn.textContent = '\uD83D\uDDD1';
+
+  const timeIcon = document.createElement('span');
+  timeIcon.className = 'task-time-icon';
+  timeIcon.textContent = timeIconText;
+
+  const addSubBtn = document.createElement('button');
+  addSubBtn.className = 'task-add-sub';
+  addSubBtn.setAttribute('aria-label', 'Add subtask');
+  addSubBtn.textContent = '+';
+  if (depth >= 5) addSubBtn.style.display = 'none';
+
+  return { timePeriod, mediaSpan, textSpan, datesWrapper, deleteBtn, timeIcon, addSubBtn };
+}
+
+function assembleTaskItem(li, parts) {
+  li.appendChild(parts.mediaSpan);
+  li.appendChild(parts.checkLabel);
+  li.appendChild(parts.timeIcon);
+  li.appendChild(parts.textSpan);
+  li.appendChild(parts.addSubBtn);
+  li.appendChild(parts.datesWrapper);
+  li.appendChild(parts.deleteBtn);
+}
+
+function wireTaskEvents(li, task, parts) {
+  const { checkLabel, deleteBtn, mediaSpan, addSubBtn, datesWrapper } = parts;
+  const isCompleted = !!task.completed_at;
+  li._taskId = task.id;
+  if (isCompleted) {
+    checkLabel.onclick = (e) => { e.preventDefault(); completeTask(task.id, li); };
+  } else {
+    checkLabel.querySelector('input').onchange = () => completeTask(task.id, li);
+  }
+  deleteBtn.onclick = () => deleteTask(task.id, li);
+  mediaSpan.onclick = () => openMediaPopup(task.id);
+  addSubBtn.onclick = (e) => { e.stopPropagation(); showSubtaskInput(task.id); };
+  datesWrapper.onclick = (e) => { e.stopPropagation(); openDateEditor(task.id); };
+  datesWrapper.style.cursor = 'pointer';
+}
+
+function setupEditMode(textSpan, task, list, isDrum) {
+  let original = task.text;
+  const debouncedEdit = debounce((id, text) => editTask(id, text), DEBOUNCE_DELAY_MS);
+
+  if (isDrum) {
+    // Long press to edit — stored on the element for access from drag handler
+    textSpan._enterEdit = () => {
+      original = task.text;
+      list.classList.add('editing');
+      textSpan.setAttribute('contenteditable', 'true');
+      const hl = document.createElement('span');
+      hl.className = 'edit-highlight';
+      hl.innerText = textSpan.innerText;
+      textSpan.innerText = '';
+      textSpan.appendChild(hl);
+      textSpan.focus();
+      document.getSelection().selectAllChildren(hl);
+    };
+    let editing = false;
+    const exitEdit = (save) => {
+      if (!editing) return;
+      editing = false;
+      const text = textSpan.innerText.trim();
+      textSpan.innerText = text || original;
+      textSpan.removeAttribute('contenteditable');
+      list.classList.remove('editing');
+      if (save && text && text !== original) debouncedEdit(task.id, text);
+    };
+    const origEnterEdit = textSpan._enterEdit;
+    textSpan._enterEdit = () => { editing = true; origEnterEdit(); };
+    textSpan.onblur = () => exitEdit(true);
+    textSpan.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); textSpan.blur(); } else if (e.key === 'Escape') { exitEdit(false); } };
+  } else {
+    // Double-click to edit in flat mode
+    textSpan.ondblclick = () => {
+      original = task.text;
+      list.classList.add('editing');
+      textSpan.setAttribute('contenteditable', 'true');
+      textSpan.focus();
+      document.getSelection().selectAllChildren(textSpan);
+    };
+    textSpan.onblur = () => {
+      const text = textSpan.innerText.trim();
+      textSpan.removeAttribute('contenteditable');
+      list.classList.remove('editing');
+      if (text && text !== original) debouncedEdit(task.id, text);
+    };
+    textSpan.onkeydown = e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); textSpan.blur(); }
+      else if (e.key === 'Escape') { textSpan.innerText = original; textSpan.blur(); }
+    };
+  }
+}
+
+function applyXpResult(result) {
+  if (!result.xpEarned) return;
+  state.level = result.level;
+  state.xp = result.currentXp;
+  state.xpMax = result.xpMax;
+  if (result.leveledUp) showPopup('levelup');
 }
 
 function processNewAchievements(achIds, leveledUp) {
@@ -277,6 +446,7 @@ function updateUI() {
   $('combo').textContent = state.combo;
   $('sound-icon').innerHTML = state.sound ? '&#128266;' : '&#128263;';
   const ss = $('sound-status'); if (ss) ss.textContent = state.sound ? 'ON' : 'OFF';
+  const dvs = $('drum-view-status'); if (dvs) dvs.textContent = state.drumView ? 'ON' : 'OFF';
 }
 
 // ========== DATE FORMATTING ==========
@@ -358,6 +528,7 @@ function renderTasks() {
   const sorted = getSortedTasks();
   _drumList = buildDrumList(sorted);
 
+  // ===== DRUM VIEW (3D curvature controlled by state.drumView) =====
   const { totalRows, centerIdx, highlightIdx, radius, angleStep } = getDrumParams();
 
   // Jump to specific drumList index — uses highlightIdx computed just above
@@ -376,11 +547,12 @@ function renderTasks() {
 
 
   // Set perspective proportional to radius for consistent visual depth
-  list.style.perspective = Math.round(radius * PERSP_K) + 'px';
+  const curved = state.drumView;
+  list.style.perspective = curved ? Math.round(radius * PERSP_K) + 'px' : 'none';
   // Wrapper pushed back by -radius so center item (translateZ=+radius) ends at Z=0
   const wrapper = document.createElement('div');
   wrapper.className = 'drum-wrapper';
-  wrapper.style.transform = 'translateZ(' + (-radius) + 'px)';
+  wrapper.style.transform = curved ? 'translateZ(' + (-radius) + 'px)' : 'none';
   list.appendChild(wrapper);
 
   const highlightTaskIdx = scrollOffset + highlightIdx;
@@ -420,6 +592,20 @@ function renderTasks() {
     }
   }
 
+  // Minimum top for center card: must not overlap header
+  const headerEl = document.querySelector('.header-block');
+  const headerBottom = headerEl ? Math.ceil(headerEl.getBoundingClientRect().bottom) + 4 : 0;
+
+  // Helper: compute transform string from angle
+  // Flat row spacing: linear pixels per angleStep degree
+  const flatStep = radius * Math.sin(angleStep * Math.PI / 180);
+  function drumTransform(angle) {
+    if (curved) return 'rotateX(' + angle + 'deg) translateZ(' + radius + 'px)';
+    // Flat mode: linear spacing based on angle units
+    const y = -angle / angleStep * flatStep;
+    return 'translateY(' + Math.round(y) + 'px)';
+  }
+
   for (let idx = 0; idx < totalRows; idx++) {
     const taskIdx = scrollOffset + idx;
     let angle = (centerIdx + drumFraction - idx) * angleStep;
@@ -434,7 +620,7 @@ function renderTasks() {
     if (taskIdx < 0 || taskIdx >= _drumList.length) {
       const li = document.createElement('li');
       li.className = 'task-item placeholder';
-      li.style.transform = 'rotateX(' + angle + 'deg) translateZ(' + radius + 'px)';
+      li.style.transform = drumTransform(angle);
       li.style.opacity = opacity;
       li.dataset.drumIdx = idx;
 
@@ -448,7 +634,7 @@ function renderTasks() {
     if (entry.type === 'header') {
       const li = document.createElement('li');
       li.className = 'task-item day-header';
-      li.style.transform = 'rotateX(' + angle + 'deg) translateZ(' + radius + 'px)';
+      li.style.transform = drumTransform(angle);
       li.style.opacity = opacity;
       li.dataset.drumIdx = idx;
       li.textContent = entry.dayName;
@@ -458,143 +644,56 @@ function renderTasks() {
 
     const task = entry.task;
     const li = document.createElement('li');
-    const hour = getHourFromISO(task.scheduled_start);
-    const { cls: timePeriod, icon: timeIconText } = getTimePeriodInfo(hour);
     const isHighlight = idx === highlightIdx;
     const depth = _getTaskDepth(task.id);
-    li.className = 'task-item' + (timePeriod ? ' ' + timePeriod : '') + (isHighlight ? ' center' : '') + (depth > 0 ? ' subtask-item' : '');
+    const parts = buildTaskElements(task, depth);
+    const checkLabel = buildCheckbox(task, li);
+
+    li.className = 'task-item' + (parts.timePeriod ? ' ' + parts.timePeriod : '') + (isHighlight ? ' center' : '') + (depth > 0 ? ' subtask-item' : '') + (task.completed_at ? ' task-done' : '');
     if (depth > 0) li.dataset.depth = depth;
-    li.style.transform = 'rotateX(' + angle + 'deg) translateZ(' + radius + 'px)';
+    li.style.transform = drumTransform(angle);
     li.style.opacity = opacity;
-    // Center tall card symmetrically on drum axis
     if (isHighlight && centerH > 38) {
-      li.style.top = 'calc(50% - ' + (centerH / 2) + 'px)';
+      li.style.top = 'max(' + headerBottom + 'px, calc(50% - ' + (centerH / 2) + 'px))';
     }
     li.dataset.id = task.id;
 
-    const start = formatTaskDate(task.scheduled_start);
-    const end = formatTaskDate(task.scheduled_end);
-
-    // Build task item using DOM methods
-    const mediaSpan = document.createElement('span');
-    mediaSpan.className = 'task-media' + (task.media ? ' has-image' : '');
-    if (task.media) {
-      const mediaEl = task.media.type === 'image' ? document.createElement('img') : document.createElement('video');
-      mediaEl.src = task.media.url;
-      if (task.media.type === 'image') mediaEl.alt = '';
-      else mediaEl.muted = true;
-      mediaSpan.appendChild(mediaEl);
-    } else {
-      mediaSpan.textContent = '\uD83D\uDDBC\uFE0F';
-    }
-
-    const isCompleted = !!task.completed_at;
-
-    const checkLabel = document.createElement('label');
-    checkLabel.className = 'task-checkbox';
-    if (isCompleted) {
-      // Show completed icon instead of checkbox
-      checkLabel.classList.add('task-completed-icon');
-      const completedSpan = document.createElement('span');
-      completedSpan.className = 'checkbox-completed';
-      completedSpan.textContent = '\u2705';
-      checkLabel.appendChild(completedSpan);
-    } else {
-      const checkInput = document.createElement('input');
-      checkInput.type = 'checkbox';
-      checkInput.setAttribute('aria-label', 'Complete quest');
-      const checkCustom = document.createElement('span');
-      checkCustom.className = 'checkbox-custom';
-      checkLabel.appendChild(checkInput);
-      checkLabel.appendChild(checkCustom);
-    }
-
-    if (isCompleted) li.classList.add('task-done');
-
-    const textSpan = document.createElement('span');
-    textSpan.className = 'task-text';
-    textSpan.dir = 'auto';
-    textSpan.textContent = task.text;
-
-    const sameDate = start.day && end.day && start.day === end.day && start.time === end.time;
-    const startDateSpan = createDateSpan(start, sameDate ? 'task-date-same' : 'task-date-start');
-    const endDateSpan = createDateSpan(end, sameDate ? 'task-date-same' : 'task-date-end');
-    const datesWrapper = document.createElement('div');
-    datesWrapper.className = 'task-dates';
-    datesWrapper.appendChild(startDateSpan);
-    datesWrapper.appendChild(endDateSpan);
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'task-delete';
-    deleteBtn.setAttribute('aria-label', 'Delete quest');
-    deleteBtn.textContent = '\uD83D\uDDD1';
-
-    const timeIcon = document.createElement('span');
-    timeIcon.className = 'task-time-icon';
-    timeIcon.textContent = timeIconText;
-
-    // Add subtask "+" button (hidden at nesting depth >= 5)
-    const nestDepth = _getTaskDepth(task.id);
-    const addSubBtn = document.createElement('button');
-    addSubBtn.className = 'task-add-sub';
-    addSubBtn.setAttribute('aria-label', 'Add subtask');
-    addSubBtn.textContent = '+';
-    if (nestDepth >= 5) addSubBtn.style.display = 'none';
-
-    li.appendChild(mediaSpan);
-    li.appendChild(checkLabel);
-    li.appendChild(timeIcon);
-    li.appendChild(textSpan);
-    li.appendChild(addSubBtn);
-    li.appendChild(datesWrapper);
-    li.appendChild(deleteBtn);
-
-    li._taskId = task.id;
-    if (isCompleted) {
-      checkLabel.onclick = (e) => { e.preventDefault(); completeTask(task.id, li); };
-    } else {
-      checkLabel.querySelector('input').onchange = () => completeTask(task.id, li);
-    }
-    deleteBtn.onclick = () => deleteTask(task.id, li);
-    mediaSpan.onclick = () => openMediaPopup(task.id);
-    addSubBtn.onclick = (e) => { e.stopPropagation(); showSubtaskInput(task.id); };
+    assembleTaskItem(li, { ...parts, checkLabel });
+    wireTaskEvents(li, task, { ...parts, checkLabel });
 
     li.dataset.drumIdx = idx;
-
-    let original = task.text;
-    const debouncedEdit = debounce((id, text) => editTask(id, text), DEBOUNCE_DELAY_MS);
-    // Long press to edit — stored on the element for access from drag handler
-    textSpan._enterEdit = () => {
-      original = task.text;
-      list.classList.add('editing');
-      textSpan.setAttribute('contenteditable', 'true');
-      const hl = document.createElement('span');
-      hl.className = 'edit-highlight';
-      hl.innerText = textSpan.innerText;
-      textSpan.innerText = '';
-      textSpan.appendChild(hl);
-      textSpan.focus();
-      document.getSelection().selectAllChildren(hl);
-    };
-    let editing = false;
-    const exitEdit = (save) => {
-      if (!editing) return;
-      editing = false;
-      const text = textSpan.innerText.trim();
-      // Remove highlight wrapper
-      textSpan.innerText = text || original;
-      textSpan.removeAttribute('contenteditable');
-      list.classList.remove('editing');
-      if (save && text && text !== original) debouncedEdit(task.id, text);
-    };
-    const origEnterEdit = textSpan._enterEdit;
-    textSpan._enterEdit = () => { editing = true; origEnterEdit(); };
-    textSpan.onblur = () => exitEdit(true);
-    textSpan.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); textSpan.blur(); } else if (e.key === 'Escape') { exitEdit(false); } };
+    setupEditMode(parts.textSpan, task, list, true);
 
     wrapper.appendChild(li);
   }
 
+  // Post-render: measure REAL center card height and push neighbors apart
+  const centerCard = wrapper.querySelector('.center');
+  if (centerCard) {
+    const realH = centerCard.offsetHeight;
+    if (realH > 38) {
+      // Clamp top so card doesn't go under header
+      centerCard.style.top = 'max(' + headerBottom + 'px, calc(50% - ' + (realH / 2) + 'px))';
+
+      // Recompute expandExtra with real height
+      const projGap = radius * Math.sin(angleStep * Math.PI / 180);
+      const overlap = realH / 2 - (projGap - 19) + 10;
+      if (overlap > 0) {
+        const realExpand = (overlap / Math.max(1, projGap)) * angleStep;
+        if (realExpand > expandExtra) {
+          // Re-position all non-center items with corrected expansion
+          wrapper.querySelectorAll('.task-item:not(.center)').forEach(li => {
+            const idx = Number(li.dataset.drumIdx);
+            if (isNaN(idx)) return;
+            let a = (centerIdx + drumFraction - idx) * angleStep;
+            a -= Math.sign(idx - highlightIdx) * realExpand;
+            li.style.transform = drumTransform(a);
+            li.style.opacity = Math.max(0.15, 1 - Math.abs(a) / 120);
+          });
+        }
+      }
+    }
+  }
 
   const taskCount = $('task-count');
   if (taskCount) taskCount.textContent = `(${state.tasks.filter(t => !t.parent_id && !t.completed_at).length})`;
@@ -663,16 +762,21 @@ function findCurrentTaskIndex(reuseList) {
   return 0;
 }
 
-// Skip header at highlight position, respecting scroll direction
+// Skip headers at highlight position, respecting scroll direction (handles consecutive headers)
 function skipHeaderAtHighlight(offset, highlightIdx, direction) {
-  const hi = offset + highlightIdx;
-  if (hi >= 0 && hi < _drumList.length && _drumList[hi].type === 'header') {
-    if (direction >= 0 && hi + 1 < _drumList.length) return offset + 1;
-    if (direction < 0 && hi - 1 >= 0) return offset - 1;
-    if (hi + 1 < _drumList.length) return offset + 1;
-    if (hi - 1 >= 0) return offset - 1;
+  const step = direction >= 0 ? 1 : -1;
+  let cur = offset;
+  // Skip up to 5 consecutive headers
+  for (let i = 0; i < 5; i++) {
+    const hi = cur + highlightIdx;
+    if (hi < 0 || hi >= _drumList.length) break;
+    if (_drumList[hi].type !== 'header') break;
+    cur += step;
   }
-  return offset;
+  // Fallback: if we went out of bounds, try opposite direction
+  const hiFinal = cur + highlightIdx;
+  if (hiFinal < 0 || hiFinal >= _drumList.length) return offset;
+  return cur;
 }
 
 function adjustScrollAfterRemove() {
@@ -742,7 +846,14 @@ function initTaskDrag() {
     const { highlightIdx } = getDrumParams();
     const { min, max } = getDrumBounds(highlightIdx);
     const clamped = Math.max(min, Math.min(max, scrollOffset));
-    if (clamped !== _prevTickOffset) { playSound('tick'); _prevTickOffset = clamped; }
+    if (clamped !== _prevTickOffset) {
+      // Skip sound if highlight lands on a day header
+      const hi = clamped + highlightIdx;
+      if (hi < 0 || hi >= _drumList.length || _drumList[hi].type !== 'header') {
+        playSound('tick');
+      }
+      _prevTickOffset = clamped;
+    }
   }
 
   function clampDrum() {
@@ -935,6 +1046,21 @@ function initTaskDrag() {
       }, 500);
     }
 
+    // Skip drum drag if touching scrollable center text (allow internal scroll)
+    const centerText = e.target.closest('.center .task-text');
+    if (centerText && centerText.scrollHeight > centerText.clientHeight) {
+      // Temporarily allow vertical touch scroll on the list
+      list.style.touchAction = 'pan-y';
+      const restoreTouch = () => {
+        list.style.touchAction = '';
+        document.removeEventListener('pointerup', restoreTouch);
+        document.removeEventListener('pointercancel', restoreTouch);
+      };
+      document.addEventListener('pointerup', restoreTouch);
+      document.addEventListener('pointercancel', restoreTouch);
+      return;
+    }
+
     cancelAnimationFrame(_drumSnapRaf);
     _drumScrollTarget = null;
     isDragging = true;
@@ -1007,6 +1133,12 @@ function initTaskDrag() {
   list.addEventListener('wheel', e => {
     // During editing, let scroll happen inside the text
     if (e.target.closest('[contenteditable="true"]')) return;
+    // Block drum scroll while cursor is inside multiline center card
+    const centerItem = e.target.closest('.center');
+    if (centerItem) {
+      const ct = centerItem.querySelector('.task-text');
+      if (ct && ct.scrollHeight > ct.clientHeight) return;
+    }
     e.preventDefault();
     cancelAnimationFrame(_drumSnapRaf);
     _drumScrollTarget = null;
@@ -1091,16 +1223,11 @@ async function addTask(text) {
     state.tasks.unshift({
       id: result.id, text: result.text, xp: result.xp,
       scheduled_start: result.scheduled_start, scheduled_end: result.scheduled_end,
-      completed_at: null, parent_id: null
+      completed_at: null, parent_id: null,
+      recurrence_rule: result.recurrence_rule || null
     });
 
-    // +3 XP for creating a task
-    if (result.xpEarned) {
-      state.level = result.level;
-      state.xp = result.currentXp;
-      state.xpMax = result.xpMax;
-      if (result.leveledUp) showPopup('levelup');
-    }
+    applyXpResult(result);
 
     renderTasks();
     scrollToNewTask(result.id);
@@ -1138,15 +1265,11 @@ async function showSubtaskInput(parentId) {
     state.tasks.push({
       id: result.id, text: result.text, xp: result.xp,
       scheduled_start: result.scheduled_start, scheduled_end: result.scheduled_end,
-      completed_at: null, parent_id: result.parent_id
+      completed_at: null, parent_id: result.parent_id,
+      recurrence_rule: result.recurrence_rule || null
     });
 
-    if (result.xpEarned) {
-      state.level = result.level;
-      state.xp = result.currentXp;
-      state.xpMax = result.xpMax;
-      if (result.leveledUp) showPopup('levelup');
-    }
+    applyXpResult(result);
 
     renderTasks();
     updateUI();
@@ -1167,31 +1290,17 @@ async function showSubtaskInput(parentId) {
 }
 
 function _applyDoneVisual(el, done) {
-  const checkLabel = el.querySelector('.task-checkbox');
-  if (!checkLabel) return;
-  // Clear children safely
-  while (checkLabel.firstChild) checkLabel.removeChild(checkLabel.firstChild);
+  const oldLabel = el.querySelector('.task-checkbox');
+  if (!oldLabel) return;
+  const fakeTask = { id: el._taskId, completed_at: done ? 'yes' : null };
+  const newLabel = buildCheckbox(fakeTask, el);
+  // Wire events
   if (done) {
-    el.classList.add('task-done');
-    checkLabel.classList.add('task-completed-icon');
-    const span = document.createElement('span');
-    span.className = 'checkbox-completed';
-    span.textContent = '\u2705';
-    checkLabel.appendChild(span);
-    checkLabel.onclick = (e) => { e.preventDefault(); completeTask(el._taskId, el); };
+    newLabel.onclick = (e) => { e.preventDefault(); completeTask(el._taskId, el); };
   } else {
-    el.classList.remove('task-done');
-    checkLabel.classList.remove('task-completed-icon');
-    checkLabel.onclick = null;
-    const inp = document.createElement('input');
-    inp.type = 'checkbox';
-    inp.setAttribute('aria-label', 'Complete quest');
-    const custom = document.createElement('span');
-    custom.className = 'checkbox-custom';
-    checkLabel.appendChild(inp);
-    checkLabel.appendChild(custom);
-    inp.onchange = () => completeTask(el._taskId, el);
+    newLabel.querySelector('input').onchange = () => completeTask(el._taskId, el);
   }
+  oldLabel.replaceWith(newLabel);
 }
 
 async function completeTask(id, el) {
@@ -1296,7 +1405,7 @@ function autoResizeTextarea(el) {
   el.style.height = el.scrollHeight + 'px';
 }
 
-['task-input','quick-task-input'].forEach(id => $(id).addEventListener('input', () => autoResizeTextarea($(id))));
+['task-input','quick-task-input'].forEach(id => { const el = $(id); if (el) el.addEventListener('input', () => autoResizeTextarea(el)); });
 
 function resetTextarea(el) {
   el.value = '';
@@ -1305,13 +1414,13 @@ function resetTextarea(el) {
 }
 
 // ========== EVENT LISTENERS ==========
-$('add-task-form').onsubmit = e => {
+if ($('add-task-form')) $('add-task-form').onsubmit = e => {
   e.preventDefault();
   addTask($('task-input').value);
   resetTextarea($('task-input'));
 };
 
-$('task-input').addEventListener('keydown', e => {
+if ($('task-input')) $('task-input').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     $('add-task-form').requestSubmit();
@@ -1350,9 +1459,8 @@ $('search-toggle').addEventListener('click', e => {
 $('add-task-toggle').addEventListener('click', e => {
   e.stopPropagation();
   const row = $('quick-add-row');
-  const visible = row.style.display !== 'none';
-  row.style.display = visible ? 'none' : 'flex';
-  if (!visible) $('quick-task-input').focus();
+  row.classList.toggle('show');
+  if (row.classList.contains('show')) $('quick-task-input').focus();
 });
 
 function closeOnClickOutside(elId, toggleId, closeAction) {
@@ -1361,7 +1469,7 @@ function closeOnClickOutside(elId, toggleId, closeAction) {
     closeAction();
   });
 }
-closeOnClickOutside('quick-add-row', 'add-task-toggle', () => { $('quick-add-row').style.display = 'none'; });
+closeOnClickOutside('quick-add-row', 'add-task-toggle', () => { $('quick-add-row').classList.remove('show'); });
 closeOnClickOutside('social-search', 'search-toggle', () => { $('social-search').classList.remove('show'); });
 
 function quickAddSubmit() {
@@ -1421,15 +1529,21 @@ async function toggleSetting(key, transform = v => !v) {
 }
 $('settings-btn').onclick = (e) => { e.stopPropagation(); $('settings-btn').closest('.settings-item-wrapper').classList.toggle('open'); };
 $('sound-toggle').onclick = () => toggleSetting('sound');
+if ($('drum-view-toggle')) $('drum-view-toggle').onclick = async () => {
+  await toggleSetting('drumView');
+  renderTasks();
+};
 $('version-btn').onclick = () => alert('Coming soon!');
 
 ['click','keydown','pointerdown'].forEach(e => document.addEventListener(e, initAudio, { once: true }));
 
 // ========== SETTINGS DROPDOWN ==========
 const [sToggle, sDrop] = [$('settings-toggle'), $('settings-dropdown')];
+function closeSettingsMenu() { sDrop.classList.remove('show'); document.querySelectorAll('.settings-item-wrapper.open').forEach(el => el.classList.remove('open')); }
 sToggle.onclick = e => { e.stopPropagation(); sDrop.classList.toggle('show'); };
-document.addEventListener('click', e => { if (!sDrop.contains(e.target) && !sToggle.contains(e.target)) { sDrop.classList.remove('show'); document.querySelectorAll('.settings-item-wrapper.open').forEach(el => el.classList.remove('open')); } });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { sDrop.classList.remove('show'); document.querySelectorAll('.settings-item-wrapper.open').forEach(el => el.classList.remove('open')); } });
+sDrop.addEventListener('click', e => { if (e.target.closest('.settings-item, .tab-btn')) closeSettingsMenu(); });
+document.addEventListener('pointerdown', e => { if (!sDrop.contains(e.target) && !sToggle.contains(e.target)) closeSettingsMenu(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSettingsMenu(); });
 
 // ========== TABS ==========
 const TAB_ORDER = ['todo', 'social', 'history', 'achievements'];
@@ -1628,10 +1742,8 @@ async function renderHistory() {
 }
 
 function formatTime(timestamp) {
-  const date = new Date(timestamp);
-  const day = date.toLocaleDateString('ru-RU');
-  const time = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-  return `${day} ${time}`;
+  const d = formatTaskDate(timestamp);
+  return `${d.day} ${d.time}`;
 }
 
 // ========== FRIENDS API ==========
@@ -1737,91 +1849,96 @@ function renderSearchResults(users) {
   });
 }
 
+function renderRequestList(section, listEl, requests, type, countEl) {
+  if (!requests || requests.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  if (countEl) countEl.textContent = requests.length;
+
+  const isIncoming = type === 'incoming';
+  listEl.textContent = '';
+  requests.forEach(req => {
+    const item = document.createElement('div');
+    item.className = 'request-item' + (isIncoming ? '' : ' outgoing');
+    item.dataset.requestId = req.id;
+
+    const avatar = document.createElement('div');
+    avatar.className = 'social-avatar';
+    avatar.textContent = req.avatar_letter;
+
+    const info = document.createElement('div');
+    info.className = 'request-info';
+    const name = document.createElement('span');
+    name.className = 'user-name';
+    name.textContent = req.username;
+    const sub = document.createElement('span');
+    sub.className = isIncoming ? 'request-time' : 'request-status';
+    sub.textContent = isIncoming ? formatRelativeTime(req.created_at) : 'Awaiting response';
+    info.append(name, sub);
+
+    item.append(avatar, info);
+
+    const reqId = req.id;
+    if (isIncoming) {
+      const actions = document.createElement('div');
+      actions.className = 'request-actions';
+      const acceptBtn = document.createElement('button');
+      acceptBtn.className = 'accept-btn';
+      acceptBtn.title = 'Accept';
+      acceptBtn.innerHTML = '&#10004;';
+      const rejectBtn = document.createElement('button');
+      rejectBtn.className = 'reject-btn';
+      rejectBtn.title = 'Decline';
+      rejectBtn.innerHTML = '&#10006;';
+      actions.append(acceptBtn, rejectBtn);
+      item.appendChild(actions);
+
+      acceptBtn.onclick = async () => {
+        await respondToRequest(reqId, 'accept');
+        item.remove();
+        if (countEl) countEl.textContent = listEl.children.length;
+        if (listEl.children.length === 0) section.style.display = 'none';
+        loadFriendsFeed();
+      };
+      rejectBtn.onclick = async () => {
+        await respondToRequest(reqId, 'reject');
+        item.remove();
+        if (countEl) countEl.textContent = listEl.children.length;
+        if (listEl.children.length === 0) section.style.display = 'none';
+      };
+    } else {
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'cancel-btn';
+      cancelBtn.title = 'Cancel';
+      cancelBtn.innerHTML = '&#10006;';
+      item.appendChild(cancelBtn);
+
+      cancelBtn.onclick = async () => {
+        await cancelFriendRequest(reqId);
+        item.remove();
+        if (listEl.children.length === 0) section.style.display = 'none';
+      };
+    }
+
+    listEl.appendChild(item);
+  });
+}
+
 async function loadFriendsData() {
   const data = await getFriends();
   if (!data) return;
 
-  const incomingSection = $('incoming-requests-section');
-  const outgoingSection = $('outgoing-requests-section');
-  const incomingList = $('incoming-requests');
-  const outgoingList = $('outgoing-requests');
-  const incomingCount = $('incoming-count');
-  const friendsEmpty = $('friends-empty');
+  renderRequestList($('incoming-requests-section'), $('incoming-requests'), data.incoming, 'incoming', $('incoming-count'));
+  renderRequestList($('outgoing-requests-section'), $('outgoing-requests'), data.outgoing, 'outgoing');
 
-  // Render incoming requests
-  if (data.incoming && data.incoming.length > 0) {
-    incomingSection.style.display = 'block';
-    incomingCount.textContent = data.incoming.length;
-    incomingList.innerHTML = data.incoming.map(req => `
-      <div class="request-item" data-request-id="${req.id}">
-        <div class="social-avatar">${esc(req.avatar_letter)}</div>
-        <div class="request-info">
-          <span class="user-name">${esc(req.username)}</span>
-          <span class="request-time">${formatRelativeTime(req.created_at)}</span>
-        </div>
-        <div class="request-actions">
-          <button class="accept-btn" title="Accept">&#10004;</button>
-          <button class="reject-btn" title="Decline">&#10006;</button>
-        </div>
-      </div>`).join('');
-
-    // Add handlers
-    incomingList.querySelectorAll('.request-item').forEach(item => {
-      const reqId = parseInt(item.dataset.requestId);
-      item.querySelector('.accept-btn').onclick = async () => {
-        await respondToRequest(reqId, 'accept');
-        item.remove();
-        const remaining = incomingList.children.length;
-        incomingCount.textContent = remaining;
-        if (remaining === 0) incomingSection.style.display = 'none';
-        loadFriendsFeed();
-      };
-      item.querySelector('.reject-btn').onclick = async () => {
-        await respondToRequest(reqId, 'reject');
-        item.remove();
-        const remaining = incomingList.children.length;
-        incomingCount.textContent = remaining;
-        if (remaining === 0) incomingSection.style.display = 'none';
-      };
-    });
-  } else {
-    incomingSection.style.display = 'none';
-  }
-
-  // Render outgoing requests
-  if (data.outgoing && data.outgoing.length > 0) {
-    outgoingSection.style.display = 'block';
-    outgoingList.innerHTML = data.outgoing.map(req => `
-      <div class="request-item outgoing" data-request-id="${req.id}">
-        <div class="social-avatar">${esc(req.avatar_letter)}</div>
-        <div class="request-info">
-          <span class="user-name">${esc(req.username)}</span>
-          <span class="request-status">Awaiting response</span>
-        </div>
-        <button class="cancel-btn" title="Cancel">&#10006;</button>
-      </div>`).join('');
-
-    // Add handlers
-    outgoingList.querySelectorAll('.request-item').forEach(item => {
-      const reqId = parseInt(item.dataset.requestId);
-      item.querySelector('.cancel-btn').onclick = async () => {
-        await cancelFriendRequest(reqId);
-        item.remove();
-        if (outgoingList.children.length === 0) outgoingSection.style.display = 'none';
-      };
-    });
-  } else {
-    outgoingSection.style.display = 'none';
-  }
-
-  // Load friends feed
   await loadFriendsFeed();
 
-  // Show/hide empty state - hide if there are requests OR friends with activity
   const hasRequests = (data.incoming && data.incoming.length > 0) ||
                       (data.outgoing && data.outgoing.length > 0);
   const hasFeed = $('friends-feed').children.length > 0;
-
+  const friendsEmpty = $('friends-empty');
   friendsEmpty.style.display = (hasRequests || hasFeed) ? 'none' : 'block';
   friendsEmpty.classList.toggle('show', !hasRequests && !hasFeed);
 }
@@ -1836,7 +1953,7 @@ async function loadFriendsFeed(append = false) {
   renderFriendsFeed(feedData.feed || [], append);
 
   const loadMoreBtn = $('load-more-feed');
-  loadMoreBtn.style.display = hasMore ? 'block' : 'none';
+  loadMoreBtn.classList.toggle('show', hasMore);
 }
 
 function renderFriendsFeed(feed, append = false) {
@@ -2094,20 +2211,12 @@ function stopVideoRecording() {
 function updateTaskMediaIcon(taskId) {
   const taskItem = document.querySelector(`.task-item[data-id="${taskId}"]`);
   if (!taskItem) return;
-
-  const mediaEl = taskItem.querySelector('.task-media');
+  const oldMedia = taskItem.querySelector('.task-media');
   const task = state.tasks.find(t => t.id === taskId);
-  const media = task?.media;
-
-  if (media) {
-    mediaEl.innerHTML = media.type === 'image'
-      ? `<img src="${media.url}" alt="Task media">`
-      : `<video src="${media.url}" muted></video>`;
-    mediaEl.classList.add('has-image');
-  } else {
-    mediaEl.innerHTML = '🖼️';
-    mediaEl.classList.remove('has-image');
-  }
+  if (!oldMedia || !task) return;
+  const newMedia = createMediaSpan(task);
+  newMedia.onclick = () => openMediaPopup(taskId);
+  oldMedia.replaceWith(newMedia);
 }
 
 async function deleteMedia() {
@@ -2286,7 +2395,7 @@ function resetIdleTimer() {
     // Skip if user is typing, menu is open, or quick-add is open
     if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.contentEditable === 'true')) return;
     if ($('settings-dropdown')?.classList.contains('show')) return;
-    if ($('quick-add-row')?.style.display !== 'none') return;
+    if ($('quick-add-row')?.classList.contains('show')) return;
     scrollToCurrentTask();
   }, 10000);
 }
@@ -2372,6 +2481,167 @@ function startDevPoll() {
   }, 5000);
 }
 startDevPoll();
+
+// ========== DATE EDITOR POPUP ==========
+let _dateEditorTaskId = null;
+
+function toLocalDatetimeStr(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  if (isNaN(d)) return '';
+  const pad = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+
+function openDateEditor(taskId) {
+  const task = state.tasks.find(t => t.id === taskId);
+  if (!task) return;
+  _dateEditorTaskId = taskId;
+
+  $('date-editor-start').value = toLocalDatetimeStr(task.scheduled_start);
+  $('date-editor-end').value = toLocalDatetimeStr(task.scheduled_end);
+
+  // Parse recurrence rule
+  let rule = null;
+  if (task.recurrence_rule) {
+    try { rule = typeof task.recurrence_rule === 'string' ? JSON.parse(task.recurrence_rule) : task.recurrence_rule; } catch {}
+  }
+
+  const repeatCheck = $('date-editor-repeat');
+  repeatCheck.checked = !!rule;
+  $('recurrence-options').classList.toggle('show', !!rule);
+
+  if (rule) {
+    $('recurrence-freq').value = rule.frequency || 'daily';
+    $('recurrence-interval').value = rule.interval || 1;
+    updateRecurrenceUI(rule.frequency || 'daily');
+
+    // Weekdays
+    document.querySelectorAll('.weekday-btn').forEach(btn => {
+      const day = parseInt(btn.dataset.day);
+      btn.classList.toggle('active', rule.weekdays ? rule.weekdays.includes(day) : false);
+    });
+
+    // Monthly day
+    if (rule.monthDay) $('recurrence-monthday').value = rule.monthDay;
+
+    // End condition
+    $('recurrence-end-type').value = rule.endType || 'never';
+    updateRecurrenceEndUI(rule.endType || 'never');
+    if (rule.endDate) $('recurrence-end-date').value = rule.endDate;
+    if (rule.endCount) $('recurrence-end-count').value = rule.endCount;
+  } else {
+    $('recurrence-freq').value = 'daily';
+    $('recurrence-interval').value = 1;
+    updateRecurrenceUI('daily');
+    document.querySelectorAll('.weekday-btn').forEach(btn => btn.classList.remove('active'));
+    $('recurrence-end-type').value = 'never';
+    updateRecurrenceEndUI('never');
+  }
+
+  $('date-editor-popup').classList.add('show');
+}
+
+function closeDateEditor() {
+  $('date-editor-popup').classList.remove('show');
+  _dateEditorTaskId = null;
+}
+
+function updateRecurrenceUI(freq) {
+  $('recurrence-weekdays').classList.toggle('show', freq === 'weekly');
+  $('recurrence-monthly').classList.toggle('show', freq === 'monthly');
+}
+
+function updateRecurrenceEndUI(endType) {
+  $('recurrence-end-date').style.display = endType === 'date' ? '' : 'none';
+  $('recurrence-end-count').style.display = endType === 'count' ? '' : 'none';
+}
+
+function buildRecurrenceRule() {
+  if (!$('date-editor-repeat').checked) return null;
+  const freq = $('recurrence-freq').value;
+  const rule = {
+    frequency: freq,
+    interval: parseInt($('recurrence-interval').value) || 1,
+    endType: $('recurrence-end-type').value
+  };
+
+  if (freq === 'weekly') {
+    rule.weekdays = [];
+    document.querySelectorAll('.weekday-btn.active').forEach(btn => {
+      rule.weekdays.push(parseInt(btn.dataset.day));
+    });
+  }
+
+  if (freq === 'monthly') {
+    rule.monthDay = parseInt($('recurrence-monthday').value) || 1;
+  }
+
+  if (rule.endType === 'date') {
+    rule.endDate = $('recurrence-end-date').value || null;
+  } else if (rule.endType === 'count') {
+    rule.endCount = parseInt($('recurrence-end-count').value) || 10;
+  }
+
+  return rule;
+}
+
+async function saveDateEditor() {
+  if (!_dateEditorTaskId) return;
+  const task = state.tasks.find(t => t.id === _dateEditorTaskId);
+  if (!task) return;
+
+  const startVal = $('date-editor-start').value;
+  const endVal = $('date-editor-end').value;
+  const scheduled_start = startVal ? new Date(startVal).toISOString() : null;
+  const scheduled_end = endVal ? new Date(endVal).toISOString() : null;
+  const recurrence_rule = buildRecurrenceRule();
+
+  const result = await api(`/api/tasks/${_dateEditorTaskId}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      text: task.text,
+      scheduled_start,
+      scheduled_end,
+      recurrence_rule
+    })
+  });
+
+  if (result && result.success) {
+    if (scheduled_start !== null) task.scheduled_start = scheduled_start;
+    if (scheduled_end !== null) task.scheduled_end = scheduled_end;
+    task.recurrence_rule = recurrence_rule ? JSON.stringify(recurrence_rule) : null;
+    renderTasks();
+    updateUI();
+  }
+
+  closeDateEditor();
+}
+
+// Wire date editor events
+(function initDateEditor() {
+  $('date-editor-close').onclick = closeDateEditor;
+  $('date-editor-save').onclick = saveDateEditor;
+
+  $('date-editor-popup').addEventListener('click', (e) => {
+    if (e.target === $('date-editor-popup')) closeDateEditor();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && $('date-editor-popup').classList.contains('show')) closeDateEditor();
+  });
+
+  $('date-editor-repeat').onchange = () => {
+    $('recurrence-options').classList.toggle('show', $('date-editor-repeat').checked);
+  };
+
+  $('recurrence-freq').onchange = () => updateRecurrenceUI($('recurrence-freq').value);
+  $('recurrence-end-type').onchange = () => updateRecurrenceEndUI($('recurrence-end-type').value);
+
+  document.querySelectorAll('.weekday-btn').forEach(btn => {
+    btn.onclick = () => btn.classList.toggle('active');
+  });
+})();
 
 // Stop auto-refresh on page unload
 window.addEventListener('beforeunload', () => {
