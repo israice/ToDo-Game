@@ -896,6 +896,36 @@ async def api_delete_task(task_id: str, user_id: int = Depends(get_authenticated
 
     return JSONResponse({'success': True})
 
+@app.post('/api/tasks/{task_id}/breakdown')
+async def api_breakdown_task(task_id: str, request: Request, user_id: int = Depends(get_authenticated_user)):
+    with get_db() as conn:
+        task = conn.execute('SELECT * FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id)).fetchone()
+        if not task:
+            return error_response('Task not found', 404)
+
+    from BACKEND.ai_service import breakdown_task
+    try:
+        subtasks_data = await breakdown_task(task['text'])
+    except Exception as e:
+        logger.error('AI breakdown failed: %s', e)
+        return error_response('AI breakdown failed', 500)
+
+    created = []
+    with get_db() as conn:
+        for st in subtasks_data:
+            sub_id, xp = _new_task_id()
+            text = st.get('text', '') if isinstance(st, dict) else str(st)
+            conn.execute(
+                'INSERT INTO tasks (id, user_id, text, xp_reward, scheduled_start, scheduled_end, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (sub_id, user_id, text, xp, task['scheduled_start'], task['scheduled_end'], task_id)
+            )
+            created.append({'id': sub_id, 'text': text, 'xp': xp,
+                            'scheduled_start': task['scheduled_start'], 'scheduled_end': task['scheduled_end'],
+                            'parent_id': task_id})
+        conn.commit()
+
+    return JSONResponse({'success': True, 'subtasks': created})
+
 @app.post('/api/tasks/{task_id}/complete')
 async def api_complete_task(task_id: str, request: Request, user_id: int = Depends(get_authenticated_user)):
     with get_db() as conn:

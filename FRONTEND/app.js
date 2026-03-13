@@ -102,7 +102,7 @@ function buildDrumList(sorted) {
       const d = new Date(iso);
       const dateKey = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
       if (dateKey !== lastDateKey) {
-        const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
+        const dayName = d.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase() + ' ' + String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0');
         list.push({ type: 'header', dayName });
         lastDateKey = dateKey;
       }
@@ -239,7 +239,7 @@ function assembleTaskItem(li, parts) {
 }
 
 function wireTaskEvents(li, task, parts) {
-  const { checkLabel, deleteBtn, mediaSpan, addSubBtn, datesWrapper } = parts;
+  const { checkLabel, deleteBtn, mediaSpan, addSubBtn, datesWrapper, magicBtn } = parts;
   const isCompleted = !!task.completed_at;
   li._taskId = task.id;
   if (isCompleted) {
@@ -252,6 +252,9 @@ function wireTaskEvents(li, task, parts) {
   addSubBtn.onclick = (e) => { e.stopPropagation(); showSubtaskInput(task.id); };
   datesWrapper.onclick = (e) => { e.stopPropagation(); _handleRecurringAction(task.id, li, 'edit'); };
   datesWrapper.style.cursor = 'pointer';
+  const depth = _getTaskDepth(task.id);
+  if (depth >= 5) { magicBtn.style.display = 'none'; }
+  else { magicBtn.onclick = (e) => { e.stopPropagation(); breakdownTask(task.id, magicBtn); }; }
 }
 
 function setupEditMode(textSpan, task, list, isDrum) {
@@ -836,7 +839,7 @@ function scrollToCurrentTask(instant) {
 function scrollToNewTask(id) {
   const sorted = getSortedTasks();
   _drumList = buildDrumList(sorted);
-  const idx = _drumList.findIndex(e => e.type === 'task' && e.task.id === id);
+  const idx = _drumList.findIndex(e => e.task && e.task.id === id);
   if (idx >= 0) {
     const { highlightIdx } = getDrumParams();
     scrollToTarget(idx - highlightIdx);
@@ -1268,14 +1271,42 @@ async function addTask(text) {
   }
 }
 
+async function breakdownTask(taskId, btn) {
+  const orig = btn.textContent;
+  btn.textContent = '⏳';
+  btn.disabled = true;
+  try {
+    const result = await api(`/api/tasks/${taskId}/breakdown`, { method: 'POST' });
+    if (result && result.subtasks) {
+      for (const st of result.subtasks) {
+        state.tasks.push({
+          id: st.id, text: st.text, xp: st.xp,
+          scheduled_start: st.scheduled_start, scheduled_end: st.scheduled_end,
+          completed_at: null, parent_id: st.parent_id,
+          recurrence_rule: null
+        });
+      }
+      renderTasks();
+      updateUI();
+      playSound('add');
+    }
+  } catch (e) {
+    console.error('Breakdown failed:', e);
+  } finally {
+    btn.textContent = orig;
+    btn.disabled = false;
+  }
+}
+
 let _subtaskInputParentId = null;
 
 async function showSubtaskInput(parentId) {
   const parent = state.tasks.find(t => t.id === parentId);
   if (!parent) return;
 
+  const siblingCount = state.tasks.filter(t => t.parent_id === parentId).length;
   const body = {
-    text: '...',
+    text: parent.text + ' ' + (siblingCount + 1),
     parent_id: parentId,
     scheduled_start: parent.scheduled_start || new Date().toISOString(),
     scheduled_end: parent.scheduled_end || new Date().toISOString()
@@ -1295,6 +1326,17 @@ async function showSubtaskInput(parentId) {
     });
 
     applyXpResult(result);
+
+    // Scroll drum to new subtask before rendering
+    const sorted = getSortedTasks();
+    _drumList = buildDrumList(sorted);
+    const newIdx = _drumList.findIndex(e => e.task && e.task.id === result.id);
+    if (newIdx >= 0) {
+      const { highlightIdx } = getDrumParams();
+      scrollOffset = newIdx - highlightIdx;
+      drumFraction = 0;
+      _drumScrollTarget = null;
+    }
 
     renderTasks();
     updateUI();
