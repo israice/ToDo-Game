@@ -28,7 +28,7 @@ python run.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.63 - server test 1"
+git commit -m "v0.0.64 - server test 2"
 git push
 python run.py
 
@@ -45,4 +45,5 @@ v0.0.60 - js files to each global functionality
 v0.0.61 - added colored sub tasks indicator in left side
 v0.0.62 - added task backgroud
 v0.0.63 - server test 1
+v0.0.64 - server test 2
 

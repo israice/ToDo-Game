@@ -57,6 +57,7 @@
     </div>
 
     <script>
+        document.body.classList.add('ready');
         function show(id) {
             document.querySelectorAll('.form, .tab').forEach(e => e.classList.remove('active'));
             document.getElementById(id).classList.add('active');
