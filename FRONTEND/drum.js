@@ -223,7 +223,7 @@ function renderTasks() {
     }
     li.dataset.id = task.id;
 
-    assembleTaskItem(li, { ...parts, checkLabel });
+    assembleTaskItem(li, { ...parts, checkLabel }, depth);
     wireTaskEvents(li, task, { ...parts, checkLabel });
 
     li.dataset.drumIdx = idx;

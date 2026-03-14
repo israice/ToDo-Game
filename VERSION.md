@@ -28,7 +28,7 @@ python run.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.60 - js files to each global functionality"
+git commit -m "v0.0.61 - added colored sub tasks indicator in left side"
 git push
 python run.py
 
@@ -42,4 +42,5 @@ v0.0.57 - added magic stick to generate 3 tasks automatecly
 v0.0.58 - added new screenshot
 v0.0.59 - added task settings button
 v0.0.60 - js files to each global functionality
+v0.0.61 - added colored sub tasks indicator in left side
 

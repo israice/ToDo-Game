@@ -158,7 +158,21 @@ function buildTaskElements(task, depth) {
   return { timePeriod, textSpan, datesWrapper, settingsWrap, settingsBtn, settingsMenu, menuDeleteBtn, menuMediaBtn, menuMagicBtn, menuAddSubBtn, timeIcon };
 }
 
-function assembleTaskItem(li, parts) {
+function assembleTaskItem(li, parts, depth) {
+  if (depth > 0) {
+    const prefix = document.createElement('span');
+    prefix.className = 'subtask-prefix';
+    prefix.textContent = ' ';
+    for (let d = 1; d <= depth; d++) {
+      const dash = document.createElement('span');
+      dash.className = 'subtask-dash';
+      dash.dataset.depth = d;
+      dash.textContent = '-';
+      prefix.appendChild(dash);
+      if (d < depth) prefix.appendChild(document.createTextNode('  '));
+    }
+    li.appendChild(prefix);
+  }
   li.appendChild(parts.checkLabel);
   li.appendChild(parts.timeIcon);
   li.appendChild(parts.textSpan);

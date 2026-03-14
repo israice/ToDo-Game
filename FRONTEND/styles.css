@@ -520,11 +520,13 @@ body {
     &:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
   }
 
-  &.subtask-item[data-depth="1"] { left: 1.5%; }
-  &.subtask-item[data-depth="2"] { left: 3%; }
-  &.subtask-item[data-depth="3"] { left: 4.5%; }
-  &.subtask-item[data-depth="4"] { left: 6%; }
-  &.subtask-item[data-depth="5"] { left: 7.5%; }
+  .subtask-prefix { font-family: monospace; font-size: 0.9rem; font-weight: 700; white-space: pre; pointer-events: none; user-select: none; }
+  .subtask-dash[data-depth="1"] { color: #c8b6ff; }
+  .subtask-dash[data-depth="2"] { color: #00ffea; }
+  .subtask-dash[data-depth="3"] { color: #fff44f; }
+  .subtask-dash[data-depth="4"] { color: #ff9a76; }
+  .subtask-dash[data-depth="5"] { color: #f0f0ff; }
+
 
   .task-text {
     flex: 1; font-size: inherit; color: var(--text-primary);
