@@ -204,42 +204,63 @@ function buildTaskElements(task, depth) {
   datesWrapper.appendChild(startDateSpan);
   datesWrapper.appendChild(endDateSpan);
 
-  const deleteBtn = document.createElement('button');
-  deleteBtn.className = 'task-delete';
-  deleteBtn.setAttribute('aria-label', 'Delete quest');
-  deleteBtn.textContent = '\uD83D\uDDD1';
+  const settingsWrap = document.createElement('div');
+  settingsWrap.className = 'task-settings-wrap';
+
+  const settingsBtn = document.createElement('button');
+  settingsBtn.className = 'task-settings';
+  settingsBtn.setAttribute('aria-label', 'Task settings');
+  settingsBtn.textContent = '\u2699';
+
+  const settingsMenu = document.createElement('div');
+  settingsMenu.className = 'task-settings-menu';
+
+  const menuMediaBtn = document.createElement('button');
+  menuMediaBtn.className = 'task-menu-item task-menu-media';
+  menuMediaBtn.textContent = '\uD83D\uDDBC\uFE0F Медиа';
+
+  const menuMagicBtn = document.createElement('button');
+  menuMagicBtn.className = 'task-menu-item task-menu-magic';
+  menuMagicBtn.textContent = '\u{1FA84} Разбить';
+  if (depth >= 5) menuMagicBtn.style.display = 'none';
+
+  const menuAddSubBtn = document.createElement('button');
+  menuAddSubBtn.className = 'task-menu-item task-menu-addsub';
+  menuAddSubBtn.textContent = '➕ Подзадача';
+  if (depth >= 5) menuAddSubBtn.style.display = 'none';
+
+  const menuDeleteBtn = document.createElement('button');
+  menuDeleteBtn.className = 'task-menu-item task-menu-delete';
+  menuDeleteBtn.textContent = '\uD83D\uDDD1 Удалить';
+
+  settingsMenu.appendChild(menuMediaBtn);
+  settingsMenu.appendChild(menuMagicBtn);
+  settingsMenu.appendChild(menuAddSubBtn);
+  settingsMenu.appendChild(menuDeleteBtn);
+  settingsWrap.appendChild(settingsBtn);
 
   const timeIcon = document.createElement('span');
   timeIcon.className = 'task-time-icon';
   timeIcon.textContent = timeIconText;
 
-  const magicBtn = document.createElement('button');
-  magicBtn.className = 'task-magic';
-  magicBtn.setAttribute('aria-label', 'Magic');
-  magicBtn.textContent = '\u{1FA84}';
-
-  const addSubBtn = document.createElement('button');
-  addSubBtn.className = 'task-add-sub';
-  addSubBtn.setAttribute('aria-label', 'Add subtask');
-  addSubBtn.textContent = '+';
-  if (depth >= 5) addSubBtn.style.display = 'none';
-
-  return { timePeriod, mediaSpan, textSpan, datesWrapper, deleteBtn, timeIcon, magicBtn, addSubBtn };
+  return { timePeriod, textSpan, datesWrapper, settingsWrap, settingsBtn, settingsMenu, menuDeleteBtn, menuMediaBtn, menuMagicBtn, menuAddSubBtn, timeIcon };
 }
 
 function assembleTaskItem(li, parts) {
-  li.appendChild(parts.mediaSpan);
   li.appendChild(parts.checkLabel);
   li.appendChild(parts.timeIcon);
   li.appendChild(parts.textSpan);
-  li.appendChild(parts.magicBtn);
-  li.appendChild(parts.addSubBtn);
   li.appendChild(parts.datesWrapper);
-  li.appendChild(parts.deleteBtn);
+  li.appendChild(parts.settingsWrap);
+}
+
+function _closeAllTaskMenus() {
+  document.querySelectorAll('.task-settings-wrap.open').forEach(el => el.classList.remove('open'));
+  document.querySelectorAll('body > .task-settings-menu').forEach(el => el.remove());
 }
 
 function wireTaskEvents(li, task, parts) {
-  const { checkLabel, deleteBtn, mediaSpan, addSubBtn, datesWrapper, magicBtn } = parts;
+  const { checkLabel, settingsBtn, settingsMenu, menuDeleteBtn, menuMediaBtn, menuMagicBtn, menuAddSubBtn, settingsWrap, datesWrapper } = parts;
   const isCompleted = !!task.completed_at;
   li._taskId = task.id;
   if (isCompleted) {
@@ -247,14 +268,45 @@ function wireTaskEvents(li, task, parts) {
   } else {
     checkLabel.querySelector('input').onchange = () => completeTask(task.id, li);
   }
-  deleteBtn.onclick = () => _handleRecurringAction(task.id, li, 'delete');
-  mediaSpan.onclick = () => openMediaPopup(task.id);
-  addSubBtn.onclick = (e) => { e.stopPropagation(); showSubtaskInput(task.id); };
+  const closeTaskMenu = () => {
+    if (settingsMenu.parentNode) settingsMenu.parentNode.removeChild(settingsMenu);
+    settingsWrap.classList.remove('open');
+  };
+  settingsBtn.onclick = (e) => {
+    e.stopPropagation();
+    const wasOpen = settingsWrap.classList.contains('open');
+    _closeAllTaskMenus();
+    if (!wasOpen) {
+      settingsWrap.classList.add('open');
+      document.body.appendChild(settingsMenu);
+      settingsMenu.style.display = 'flex';
+      const rect = settingsBtn.getBoundingClientRect();
+      settingsMenu.style.top = (rect.bottom + 4) + 'px';
+      settingsMenu.style.right = (window.innerWidth - rect.right) + 'px';
+    }
+  };
+  menuDeleteBtn.onclick = (e) => {
+    e.stopPropagation();
+    closeTaskMenu();
+    _handleRecurringAction(task.id, li, 'delete');
+  };
+  menuMediaBtn.onclick = (e) => {
+    e.stopPropagation();
+    closeTaskMenu();
+    openMediaPopup(task.id);
+  };
+  menuMagicBtn.onclick = (e) => {
+    e.stopPropagation();
+    closeTaskMenu();
+    breakdownTask(task.id, menuMagicBtn);
+  };
+  menuAddSubBtn.onclick = (e) => {
+    e.stopPropagation();
+    closeTaskMenu();
+    showSubtaskInput(task.id);
+  };
   datesWrapper.onclick = (e) => { e.stopPropagation(); _handleRecurringAction(task.id, li, 'edit'); };
   datesWrapper.style.cursor = 'pointer';
-  const depth = _getTaskDepth(task.id);
-  if (depth >= 5) { magicBtn.style.display = 'none'; }
-  else { magicBtn.onclick = (e) => { e.stopPropagation(); breakdownTask(task.id, magicBtn); }; }
 }
 
 function setupEditMode(textSpan, task, list, isDrum) {
@@ -600,15 +652,16 @@ function renderTasks() {
     const pText = document.createElement('span');
     pText.className = 'task-text';
     pText.textContent = ct.text;
-    const pMedia = document.createElement('span'); pMedia.className = 'task-media'; pMedia.textContent = '\uD83D\uDDBC\uFE0F';
     const pCheck = document.createElement('label'); pCheck.className = 'task-checkbox';
     const pIcon = document.createElement('span'); pIcon.className = 'task-time-icon';
     const pDates = document.createElement('div'); pDates.className = 'task-dates';
     const pDate1 = document.createElement('span'); pDate1.className = 'task-date';
     const pDate2 = document.createElement('span'); pDate2.className = 'task-date';
     pDates.append(pDate1, pDate2);
-    const pDel = document.createElement('button'); pDel.className = 'task-delete';
-    probe.append(pMedia, pCheck, pIcon, pText, pDates, pDel);
+    const pSetWrap = document.createElement('div'); pSetWrap.className = 'task-settings-wrap';
+    const pSetBtn = document.createElement('button'); pSetBtn.className = 'task-settings';
+    pSetWrap.appendChild(pSetBtn);
+    probe.append(pCheck, pIcon, pText, pDates, pSetWrap);
     list.appendChild(probe);
     centerH = probe.offsetHeight;
     list.removeChild(probe);
@@ -1035,8 +1088,6 @@ function initTaskDrag() {
           if (btn) { btn.click(); return; }
           const label = el.closest('label');
           if (label) { label.click(); return; }
-          const media = el.closest('.task-media');
-          if (media) { media.click(); return; }
         }
         return;
       }
@@ -1609,7 +1660,10 @@ const [sToggle, sDrop] = [$('settings-toggle'), $('settings-dropdown')];
 function closeSettingsMenu() { sDrop.classList.remove('show'); document.querySelectorAll('.settings-item-wrapper.open').forEach(el => el.classList.remove('open')); }
 sToggle.onclick = e => { e.stopPropagation(); sDrop.classList.toggle('show'); };
 sDrop.addEventListener('click', e => { if (e.target.closest('.settings-item, .tab-btn')) closeSettingsMenu(); });
-document.addEventListener('pointerdown', e => { if (!sDrop.contains(e.target) && !sToggle.contains(e.target)) closeSettingsMenu(); });
+document.addEventListener('pointerdown', e => {
+  if (!sDrop.contains(e.target) && !sToggle.contains(e.target)) closeSettingsMenu();
+  if (!e.target.closest('.task-settings-wrap') && !e.target.closest('.task-settings-menu')) _closeAllTaskMenus();
+});
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSettingsMenu(); });
 
 // ========== TABS ==========
@@ -2276,14 +2330,7 @@ function stopVideoRecording() {
 }
 
 function updateTaskMediaIcon(taskId) {
-  const taskItem = document.querySelector(`.task-item[data-id="${taskId}"]`);
-  if (!taskItem) return;
-  const oldMedia = taskItem.querySelector('.task-media');
-  const task = state.tasks.find(t => t.id === taskId);
-  if (!oldMedia || !task) return;
-  const newMedia = createMediaSpan(task);
-  newMedia.onclick = () => openMediaPopup(taskId);
-  oldMedia.replaceWith(newMedia);
+  // Media is now accessed via settings menu, no inline icon to update
 }
 
 async function deleteMedia() {

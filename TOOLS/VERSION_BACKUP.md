@@ -38,3 +38,15 @@ v0.0.36 - server test 2
 v0.0.37 - server test 3
 v0.0.38 - server test 4
 v0.0.39 - server test 5
+v0.0.40 - server test 6
+v0.0.41 - improved documentation behavior
+v0.0.42 - improved configuration loading
+v0.0.43 - version update test 1
+v0.0.44 - changed to english version
+v0.0.45 - added data of start and deadline
+v0.0.46 - added google calendar support
+v0.0.47 - Picker Wheel for table
+v0.0.48 - Fullscreen drum roller
+v0.0.49 - added keyboard swiping pages right and left
+v0.0.50 - new screenshots
+v0.0.51 - added enddless keyboard totation of tabs

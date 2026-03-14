@@ -533,16 +533,40 @@ body {
     &.task-date-same { color: var(--accent-warning); }
   }
 
-  .task-delete {
-    width: 24px; padding: 2px; background: transparent; border: none;
-    color: var(--text-muted); font-size: 0.85rem; cursor: pointer; border-radius: 6px;
-    transition: all var(--transition-fast);
-    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  .task-settings-wrap {
+    position: relative; flex-shrink: 0;
 
-    &:hover { background: rgba(255, 107, 107, 0.2); color: var(--accent-fire); }
+    .task-settings {
+      width: 24px; padding: 2px; background: transparent; border: none;
+      color: var(--text-muted); font-size: 0.85rem; cursor: pointer; border-radius: 6px;
+      transition: all var(--transition-fast);
+      display: flex; align-items: center; justify-content: center;
+
+      &:hover { background: rgba(100, 180, 255, 0.2); color: var(--accent-info); }
+    }
+
+    &.open .task-settings { background: rgba(100, 180, 255, 0.15); color: var(--accent-info); }
   }
 }
 
+.task-settings-menu {
+  position: fixed;
+  display: flex; flex-direction: column;
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+  border-radius: 8px; padding: 4px 0; min-width: 130px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3); z-index: var(--z-popup);
+
+  .task-menu-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 12px; background: none; border: none;
+    color: var(--text-primary); font-size: 0.8rem; cursor: pointer;
+    white-space: nowrap; transition: background var(--transition-fast);
+
+    &:hover { background: var(--bg-hover); }
+  }
+
+  .task-menu-delete:hover { background: rgba(255, 107, 107, 0.15); color: var(--accent-fire); }
+}
 
 /* ===== FLAT VIEW MODE ===== */
 .tasks-list.flat-view {
