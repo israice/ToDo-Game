@@ -33,14 +33,14 @@
                     <span class="xp-text"><span id="xp">0</span>/<span id="xp-max">100</span></span>
                 </div>
             </div>
-            <button class="search-toggle-btn" id="search-toggle" aria-label="Search users">
+            <button class="icon-btn search-toggle-btn" id="search-toggle" aria-label="Search users">
                 <span>&#128269;</span>
             </button>
-            <button class="add-task-btn" id="add-task-toggle" aria-label="Add task">
+            <button class="icon-btn add-task-btn" id="add-task-toggle" aria-label="Add task">
                 <span>+</span>
             </button>
             <div class="settings-wrapper">
-                <button class="settings-btn" id="settings-toggle" aria-label="User">
+                <button class="icon-btn settings-btn" id="settings-toggle" aria-label="User">
                     <span class="user-icon"></span>
                 </button>
                 <div class="settings-dropdown" id="settings-dropdown">
@@ -92,31 +92,21 @@
                         <span class="settings-label">Achievements</span>
                     </button>
                     <div class="settings-divider"></div>
-                    <div class="settings-item-wrapper">
-                        <button class="settings-item" id="settings-btn">
-                            <span>&#9881;</span>
-                            <span class="settings-label">Settings</span>
-                        </button>
-                        <div class="settings-submenu">
-                            <button class="settings-item" id="sound-toggle">
-                                <span id="sound-icon">&#128264;</span>
-                                <span class="settings-label">Sound</span>
-                                <span class="settings-status" id="sound-status">OFF</span>
-                            </button>
-                            <div class="settings-divider"></div>
-                            <button class="settings-item" id="gcal-toggle">
-                                <span>&#128197;</span>
-                                <span class="settings-label">Google Calendar</span>
-                                <span class="settings-status" id="gcal-status">OFF</span>
-                            </button>
-                            <div class="settings-divider"></div>
-                            <button class="settings-item" id="drum-view-toggle">
-                                <span>&#127922;</span>
-                                <span class="settings-label">Drum</span>
-                                <span class="settings-status" id="drum-view-status">ON</span>
-                            </button>
-                        </div>
-                    </div>
+                    <button class="settings-item" id="sound-toggle">
+                        <span id="sound-icon">&#128264;</span>
+                        <span class="settings-label">Sound</span>
+                        <span class="settings-status" id="sound-status">OFF</span>
+                    </button>
+                    <button class="settings-item" id="gcal-toggle">
+                        <span>&#128197;</span>
+                        <span class="settings-label">Google Calendar</span>
+                        <span class="settings-status" id="gcal-status">OFF</span>
+                    </button>
+                    <button class="settings-item" id="drum-view-toggle">
+                        <span>&#127922;</span>
+                        <span class="settings-label">Drum</span>
+                        <span class="settings-status" id="drum-view-status">ON</span>
+                    </button>
                     <div class="settings-divider"></div>
                     <button class="settings-item" id="version-btn">
                         <span>&#128736;</span>
@@ -240,7 +230,7 @@
         </main>
 
         <!-- Achievement popup -->
-        <div class="achievement-popup" id="achievement-popup" role="alert" aria-live="assertive">
+        <div class="overlay achievement-popup" id="achievement-popup" role="alert" aria-live="assertive">
             <div class="popup-content">
                 <div class="popup-icon" id="popup-icon">&#127942;</div>
                 <div class="popup-title">Achievement Unlocked!</div>
@@ -250,7 +240,7 @@
         </div>
 
         <!-- Level up popup -->
-        <div class="levelup-popup" id="levelup-popup" role="dialog" aria-live="assertive" aria-label="Level up notification">
+        <div class="overlay levelup-popup" id="levelup-popup" role="dialog" aria-live="assertive" aria-label="Level up notification">
             <div class="levelup-content">
                 <div class="levelup-stars">&#10024; &#10024; &#10024;</div>
                 <div class="levelup-title">LEVEL UP!</div>
@@ -260,11 +250,11 @@
         </div>
 
         <!-- Media Popup -->
-        <div id="media-popup" class="media-popup-overlay" role="dialog" aria-label="Add media">
-            <div class="media-popup">
-                <div class="media-popup-header">
+        <div id="media-popup" class="overlay media-popup-overlay" role="dialog" aria-label="Add media">
+            <div class="overlay-panel media-popup">
+                <div class="overlay-header">
                     <span>Add media</span>
-                    <button class="media-popup-close" id="media-popup-close" aria-label="Close">&times;</button>
+                    <button class="overlay-close" id="media-popup-close" aria-label="Close">&times;</button>
                 </div>
                 <div class="media-popup-preview" id="media-preview"></div>
                 <div class="camera-view hidden" id="camera-view">
@@ -284,11 +274,11 @@
         </div>
 
         <!-- Recurrence Choice Dialog -->
-        <div id="recurrence-choice-popup" class="recurrence-choice-overlay" role="dialog" aria-label="Edit recurring task">
-            <div class="recurrence-choice-content">
-                <div class="recurrence-choice-header">
+        <div id="recurrence-choice-popup" class="overlay recurrence-choice-overlay" role="dialog" aria-label="Edit recurring task">
+            <div class="overlay-panel recurrence-choice-content">
+                <div class="overlay-header">
                     <span>Recurring task</span>
-                    <button class="recurrence-choice-close" id="recurrence-choice-close" aria-label="Close">&times;</button>
+                    <button class="overlay-close" id="recurrence-choice-close" aria-label="Close">&times;</button>
                 </div>
                 <div class="recurrence-choice-buttons">
                     <button class="recurrence-choice-btn" id="recurrence-choice-this">
@@ -304,11 +294,11 @@
         </div>
 
         <!-- Date Editor Popup -->
-        <div id="date-editor-popup" class="date-editor-overlay" role="dialog" aria-label="Edit dates">
-            <div class="date-editor-content">
-                <div class="date-editor-header">
+        <div id="date-editor-popup" class="overlay date-editor-overlay" role="dialog" aria-label="Edit dates">
+            <div class="overlay-panel date-editor-content">
+                <div class="overlay-header">
                     <span>Edit Dates</span>
-                    <button class="date-editor-close" id="date-editor-close" aria-label="Close">&times;</button>
+                    <button class="overlay-close" id="date-editor-close" aria-label="Close">&times;</button>
                 </div>
                 <div class="date-editor-fields">
                     <label class="date-editor-label">
@@ -347,13 +337,13 @@
                             </div>
                         </label>
                         <div class="recurrence-weekdays" id="recurrence-weekdays">
-                            <button type="button" class="weekday-btn" data-day="0">Mo</button>
-                            <button type="button" class="weekday-btn" data-day="1">Tu</button>
-                            <button type="button" class="weekday-btn" data-day="2">We</button>
-                            <button type="button" class="weekday-btn" data-day="3">Th</button>
-                            <button type="button" class="weekday-btn" data-day="4">Fr</button>
-                            <button type="button" class="weekday-btn" data-day="5">Sa</button>
-                            <button type="button" class="weekday-btn" data-day="6">Su</button>
+                            <button type="button" class="icon-btn weekday-btn" data-day="0">Mo</button>
+                            <button type="button" class="icon-btn weekday-btn" data-day="1">Tu</button>
+                            <button type="button" class="icon-btn weekday-btn" data-day="2">We</button>
+                            <button type="button" class="icon-btn weekday-btn" data-day="3">Th</button>
+                            <button type="button" class="icon-btn weekday-btn" data-day="4">Fr</button>
+                            <button type="button" class="icon-btn weekday-btn" data-day="5">Sa</button>
+                            <button type="button" class="icon-btn weekday-btn" data-day="6">Su</button>
                         </div>
                         <div class="recurrence-end-section">
                             <label class="date-editor-label">
@@ -374,12 +364,21 @@
         </div>
 
         <!-- Lightbox for social feed media -->
-        <div id="social-lightbox" class="social-lightbox">
+        <div id="social-lightbox" class="overlay social-lightbox">
             <div class="social-lightbox-content" id="social-lightbox-content"></div>
         </div>
 
     </div>
 
 <script src="{{ url_for('static', path='app.js') }}?v={{ app_version }}&t={{ cache_bust }}"></script>
+<script src="{{ url_for('static', path='api.js') }}?v={{ app_version }}&t={{ cache_bust }}"></script>
+<script src="{{ url_for('static', path='achievements.js') }}?v={{ app_version }}&t={{ cache_bust }}"></script>
+<script src="{{ url_for('static', path='drum.js') }}?v={{ app_version }}&t={{ cache_bust }}"></script>
+<script src="{{ url_for('static', path='tasks.js') }}?v={{ app_version }}&t={{ cache_bust }}"></script>
+<script src="{{ url_for('static', path='popups.js') }}?v={{ app_version }}&t={{ cache_bust }}"></script>
+<script src="{{ url_for('static', path='gcal.js') }}?v={{ app_version }}&t={{ cache_bust }}"></script>
+<script src="{{ url_for('static', path='history.js') }}?v={{ app_version }}&t={{ cache_bust }}"></script>
+<script src="{{ url_for('static', path='social.js') }}?v={{ app_version }}&t={{ cache_bust }}"></script>
+<script src="{{ url_for('static', path='init.js') }}?v={{ app_version }}&t={{ cache_bust }}"></script>
 </body>
 </html>

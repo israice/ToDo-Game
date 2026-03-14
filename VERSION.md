@@ -28,7 +28,7 @@ python run.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.59 - added task settings button"
+git commit -m "v0.0.60 - js files to each global functionality"
 git push
 python run.py
 
@@ -41,4 +41,5 @@ v0.0.56 - added sync between google calendar and table tasks
 v0.0.57 - added magic stick to generate 3 tasks automatecly
 v0.0.58 - added new screenshot
 v0.0.59 - added task settings button
+v0.0.60 - js files to each global functionality
 
