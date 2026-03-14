@@ -1,6 +1,7 @@
+import os
 import json
 import httpx
-from SETTINGS import GROQ_API_KEY, GROQ_MODEL
+from SETTINGS import GROQ_MODEL
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -11,13 +12,14 @@ Always return exactly 3 sub-tasks. Keep them concise and actionable."""
 
 
 async def _call_groq(system: str, user: str) -> str:
-    if not GROQ_API_KEY:
+    api_key = os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
         raise ValueError("GROQ_API_KEY is not set")
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(
             GROQ_URL,
             headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
             json={
