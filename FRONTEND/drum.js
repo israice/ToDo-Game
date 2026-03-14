@@ -144,7 +144,6 @@ function renderTasks() {
     pText.className = 'task-text';
     pText.textContent = ct.text;
     const pCheck = document.createElement('label'); pCheck.className = 'task-checkbox';
-    const pIcon = document.createElement('span'); pIcon.className = 'task-time-icon';
     const pDates = document.createElement('div'); pDates.className = 'task-dates';
     const pDate1 = document.createElement('span'); pDate1.className = 'task-date';
     const pDate2 = document.createElement('span'); pDate2.className = 'task-date';
@@ -152,7 +151,7 @@ function renderTasks() {
     const pSetWrap = document.createElement('div'); pSetWrap.className = 'task-settings-wrap';
     const pSetBtn = document.createElement('button'); pSetBtn.className = 'task-settings';
     pSetWrap.appendChild(pSetBtn);
-    probe.append(pCheck, pIcon, pText, pDates, pSetWrap);
+    probe.append(pCheck, pText, pDates, pSetWrap);
     list.appendChild(probe);
     centerH = probe.offsetHeight;
     list.removeChild(probe);

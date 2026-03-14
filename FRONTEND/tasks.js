@@ -151,11 +151,7 @@ function buildTaskElements(task, depth) {
   settingsMenu.appendChild(menuDeleteBtn);
   settingsWrap.appendChild(settingsBtn);
 
-  const timeIcon = document.createElement('span');
-  timeIcon.className = 'task-time-icon';
-  timeIcon.textContent = timeIconText;
-
-  return { timePeriod, textSpan, datesWrapper, settingsWrap, settingsBtn, settingsMenu, menuDeleteBtn, menuMediaBtn, menuMagicBtn, menuAddSubBtn, timeIcon };
+  return { timePeriod, textSpan, datesWrapper, settingsWrap, settingsBtn, settingsMenu, menuDeleteBtn, menuMediaBtn, menuMagicBtn, menuAddSubBtn };
 }
 
 function assembleTaskItem(li, parts, depth) {
@@ -174,7 +170,6 @@ function assembleTaskItem(li, parts, depth) {
     li.appendChild(prefix);
   }
   li.appendChild(parts.checkLabel);
-  li.appendChild(parts.timeIcon);
   li.appendChild(parts.textSpan);
   li.appendChild(parts.datesWrapper);
   li.appendChild(parts.settingsWrap);

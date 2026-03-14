@@ -445,10 +445,40 @@ body {
   backface-visibility: visible;
   transition: border-color var(--transition-fast);
 
-  &.time-night   { background: #1a1a38; border-color: #2a2a50; }
-  &.time-morning { background: #2a2535; border-color: #3d3548; }
-  &.time-day     { background: #252a3e; border-color: #354058; }
-  &.time-evening { background: #2d1f38; border-color: #402d4a; }
+  &.time-night,
+  &.time-morning,
+  &.time-day,
+  &.time-evening {
+    border-color: transparent;
+    overflow: hidden;
+  }
+  &.time-night::before,
+  &.time-morning::before,
+  &.time-day::before,
+  &.time-evening::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    background-position: center;
+    border-radius: inherit;
+    opacity: 0.45;
+    z-index: 0;
+    pointer-events: none;
+  }
+  &.time-night > *,
+  &.time-morning > *,
+  &.time-day > *,
+  &.time-evening > * { position: relative; z-index: 1; }
+  &.task-done.time-night::before,
+  &.task-done.time-morning::before,
+  &.task-done.time-day::before,
+  &.task-done.time-evening::before { opacity: 0.2; }
+  &.time-morning::before { background-image: url('bg_morning.png'); }
+  &.time-day::before     { background-image: url('bg_day.png'); }
+  &.time-evening::before { background-image: url('bg_evening.png'); }
+  &.time-night::before   { background-image: url('bg_night.png'); }
 
   &.center { border: 2px solid var(--accent-fire); border-radius: 10px; height: auto; min-height: 38px; max-height: 60vh; transition: border-color 0.2s ease; }
   &.center:has(.task-text[contenteditable="true"]) { border-color: var(--accent-primary); }
@@ -472,9 +502,6 @@ body {
     font-size: 14px; cursor: pointer;
   }
 
-  .task-time-icon {
-    width: 16px; flex-shrink: 0; font-size: 12px; text-align: center;
-  }
 
   .task-checkbox {
     position: relative; width: 20px; height: 20px; cursor: pointer; flex-shrink: 0; align-self: center;
@@ -503,7 +530,6 @@ body {
 
   &.task-done { background: rgba(37, 37, 66, 0.4); }
   &.task-done .task-text { opacity: 0.45; }
-  &.task-done .task-time-icon { opacity: 0.45; }
   &.task-done .task-dates { opacity: 0.45; }
 
   .task-magic {
