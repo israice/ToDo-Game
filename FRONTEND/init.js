@@ -60,6 +60,7 @@ function quickAddSubmit() {
   if (!text) return;
   addTask(text);
   resetTextarea(input);
+  $('quick-add-row').classList.remove('show');
 }
 
 $('quick-add-submit').addEventListener('click', quickAddSubmit);

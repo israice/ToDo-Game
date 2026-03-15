@@ -1178,8 +1178,9 @@ async def bot_add_task(request: Request, user_id: int = Depends(get_token_authen
     if err: return err
 
     task_id, xp = _new_task_id()
-    scheduled_start = data.get('scheduled_start') or None
-    scheduled_end = data.get('scheduled_end') or None
+    now_iso = datetime.utcnow().isoformat()
+    scheduled_start = data.get('scheduled_start') or now_iso
+    scheduled_end = data.get('scheduled_end') or now_iso
 
     with get_db() as conn:
         conn.execute('INSERT INTO tasks (id, user_id, text, xp_reward, scheduled_start, scheduled_end) VALUES (?, ?, ?, ?, ?, ?)',
