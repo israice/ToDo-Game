@@ -254,6 +254,23 @@ function renderTasks() {
     }
   }
 
+  // Connect subtask vertical lines
+  const items = wrapper.querySelectorAll('.task-item');
+  for (let i = 0; i < items.length - 1; i++) {
+    const curDashes = items[i].querySelectorAll('.subtask-dash');
+    const nextDashes = items[i + 1].querySelectorAll('.subtask-dash');
+    const nextDepths = new Set();
+    nextDashes.forEach(d => nextDepths.add(d.dataset.depth));
+    const curDepths = new Set();
+    curDashes.forEach(d => curDepths.add(d.dataset.depth));
+    curDashes.forEach(d => {
+      if (nextDepths.has(d.dataset.depth)) d.classList.add('connected-down');
+    });
+    nextDashes.forEach(d => {
+      if (curDepths.has(d.dataset.depth)) d.classList.add('connected-up');
+    });
+  }
+
   const taskCount = $('task-count');
   if (taskCount) taskCount.textContent = `(${state.tasks.filter(t => !t.parent_id && !t.completed_at).length})`;
 

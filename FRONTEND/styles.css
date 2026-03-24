@@ -547,11 +547,36 @@ body {
   }
 
   .subtask-prefix { font-family: monospace; font-size: 0.9rem; font-weight: 700; white-space: pre; pointer-events: none; user-select: none; }
+  .subtask-dash { position: relative; }
   .subtask-dash[data-depth="1"] { color: #c8b6ff; }
   .subtask-dash[data-depth="2"] { color: #00ffea; }
   .subtask-dash[data-depth="3"] { color: #fff44f; }
   .subtask-dash[data-depth="4"] { color: #ff9a76; }
   .subtask-dash[data-depth="5"] { color: #f0f0ff; }
+  .subtask-dash.connected-down::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 2px;
+    height: 50px;
+    background: currentColor;
+    opacity: 0.45;
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+  .subtask-dash.connected-up::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: 50%;
+    width: 2px;
+    height: 50px;
+    background: currentColor;
+    opacity: 0.45;
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
 
 
   .task-text {
