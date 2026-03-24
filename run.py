@@ -165,7 +165,7 @@ def init_db():
                 id INTEGER PRIMARY KEY, user_id INTEGER UNIQUE NOT NULL,
                 level INTEGER DEFAULT 1, xp INTEGER DEFAULT 0, xp_max INTEGER DEFAULT 100,
                 completed_tasks INTEGER DEFAULT 0, current_streak INTEGER DEFAULT 0,
-                combo INTEGER DEFAULT 0, last_completion_date TEXT, sound_enabled INTEGER DEFAULT 0, drum_view INTEGER DEFAULT 1,
+                combo INTEGER DEFAULT 0, last_completion_date TEXT, sound_enabled INTEGER DEFAULT 0, drum_view INTEGER DEFAULT 1, task_bg INTEGER DEFAULT 0,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE);
             CREATE TABLE IF NOT EXISTS user_achievements (
                 id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, achievement_id TEXT NOT NULL,
@@ -244,6 +244,8 @@ def init_db():
         up_cols = {row[1] for row in up_cursor.fetchall()}
         if 'drum_view' not in up_cols:
             conn.execute('ALTER TABLE user_progress ADD COLUMN drum_view INTEGER DEFAULT 1')
+        if 'task_bg' not in up_cols:
+            conn.execute('ALTER TABLE user_progress ADD COLUMN task_bg INTEGER DEFAULT 0')
 
         # Migrate activity_log: add task_id column
         al_cursor = conn.execute("PRAGMA table_info(activity_log)")
@@ -297,7 +299,7 @@ def get_or_create_progress(conn, user_id):
     if not progress:
         conn.execute('INSERT INTO user_progress (user_id) VALUES (?)', (user_id,))
         conn.commit()
-        return {'level': 1, 'xp': 0, 'xp_max': 100, 'completed_tasks': 0, 'current_streak': 0, 'combo': 0, 'sound_enabled': 0, 'drum_view': 1}
+        return {'level': 1, 'xp': 0, 'xp_max': 100, 'completed_tasks': 0, 'current_streak': 0, 'combo': 0, 'sound_enabled': 0, 'drum_view': 1, 'task_bg': 0}
     return dict(progress)
 
 def apply_xp(progress, xp_amount):
@@ -794,7 +796,8 @@ async def api_get_state(user_id: int = Depends(get_authenticated_user)):
             'tasks': tasks, 'level': progress['level'], 'xp': progress['xp'], 'xpMax': progress['xp_max'],
             'completed': progress['completed_tasks'], 'streak': progress['current_streak'],
             'combo': progress['combo'], 'achievements': achievements, 'sound': bool(progress['sound_enabled']),
-            'drumView': bool(progress.get('drum_view', 1))
+            'drumView': bool(progress.get('drum_view', 1)),
+            'taskBg': bool(progress.get('task_bg', 0))
         }
         if APP_DEBUG:
             css_hash, other_hash = _compute_files_hash()
@@ -809,6 +812,8 @@ async def api_update_settings(request: Request, user_id: int = Depends(get_authe
             conn.execute('UPDATE user_progress SET sound_enabled = ? WHERE user_id = ?', (1 if data['sound'] else 0, user_id))
         if 'drumView' in data:
             conn.execute('UPDATE user_progress SET drum_view = ? WHERE user_id = ?', (1 if data['drumView'] else 0, user_id))
+        if 'taskBg' in data:
+            conn.execute('UPDATE user_progress SET task_bg = ? WHERE user_id = ?', (1 if data['taskBg'] else 0, user_id))
         conn.commit()
     return JSONResponse({'success': True})
 

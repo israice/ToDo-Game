@@ -574,9 +574,6 @@ body {
     gap: 0; min-width: 0; overflow: hidden;
     border: 1px solid transparent; border-radius: 3px; padding: 1px 3px;
   }
-  .task-dates.has-recurrence {
-    border-color: gold;
-  }
   .task-dates.gcal-sourced {
     border-color: #4285f4;
   }
@@ -600,8 +597,8 @@ body {
     position: relative; flex-shrink: 0;
 
     .task-settings {
-      width: 24px; padding: 2px; background: transparent; border: none;
-      color: var(--text-muted); font-size: 0.85rem; cursor: pointer; border-radius: 6px;
+      width: 30px; height: 30px; padding: 4px; background: transparent; border: 2px solid transparent;
+      color: var(--text-muted); font-size: 0.85rem; cursor: pointer; border-radius: 50%;
       transition: all var(--transition-fast);
       display: flex; align-items: center; justify-content: center;
 
@@ -609,6 +606,11 @@ body {
     }
 
     &.open .task-settings { background: rgba(100, 180, 255, 0.15); color: var(--accent-info); }
+  }
+
+  &:has(.task-dates.has-recurrence) .task-settings,
+  &:has(.task-dates.gcal-sourced) .task-settings {
+    border-color: rgba(255, 255, 255, 0.7);
   }
 }
 

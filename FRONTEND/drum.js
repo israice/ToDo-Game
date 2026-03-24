@@ -213,7 +213,7 @@ function renderTasks() {
     const parts = buildTaskElements(task, depth);
     const checkLabel = buildCheckbox(task, li);
 
-    li.className = 'task-item' + (parts.timePeriod ? ' ' + parts.timePeriod : '') + (isHighlight ? ' center' : '') + (depth > 0 ? ' subtask-item' : '') + (task.completed_at ? ' task-done' : '');
+    li.className = 'task-item' + (state.taskBg && parts.timePeriod ? ' ' + parts.timePeriod : '') + (isHighlight ? ' center' : '') + (depth > 0 ? ' subtask-item' : '') + (task.completed_at ? ' task-done' : '');
     if (depth > 0) li.dataset.depth = depth;
     li.style.transform = drumTransform(angle);
     li.style.opacity = opacity;

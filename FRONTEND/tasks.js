@@ -4,7 +4,7 @@ function formatTaskDate(iso) {
   if (!iso) return { day: '', time: '' };
   const d = new Date(iso);
   if (isNaN(d.getTime())) return { day: '', time: '' };
-  const day = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const day = d.getFullYear() + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + String(d.getDate()).padStart(2, '0');
   const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   return { day, time };
 }
@@ -120,7 +120,7 @@ function buildTaskElements(task, depth) {
   const settingsBtn = document.createElement('button');
   settingsBtn.className = 'task-settings';
   settingsBtn.setAttribute('aria-label', 'Task settings');
-  settingsBtn.textContent = '\u2699';
+  settingsBtn.textContent = timeIconText || '\u2699';
 
   const settingsMenu = document.createElement('div');
   settingsMenu.className = 'task-settings-menu';

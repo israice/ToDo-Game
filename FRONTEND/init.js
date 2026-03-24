@@ -89,6 +89,10 @@ if ($('drum-view-toggle')) $('drum-view-toggle').onclick = async () => {
   await toggleSetting('drumView');
   renderTasks();
 };
+if ($('bg-toggle')) $('bg-toggle').onclick = async () => {
+  await toggleSetting('taskBg');
+  renderTasks();
+};
 $('version-btn').onclick = () => {};
 
 ['click','keydown','pointerdown'].forEach(e => document.addEventListener(e, initAudio, { once: true }));

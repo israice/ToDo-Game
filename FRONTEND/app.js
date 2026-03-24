@@ -14,7 +14,7 @@ const DEBOUNCE_DELAY_MS = 300;
 // ========== STATE ==========
 let state = {
   tasks: [], level: 1, xp: 0, xpMax: 100, combo: 0, completed: 0,
-  achievements: {}, streak: 0, sound: false, drumView: true
+  achievements: {}, streak: 0, sound: false, drumView: true, taskBg: false
 };
 let comboTimer = null;
 let audioCtx = null;
@@ -64,6 +64,7 @@ function updateUI() {
   $('sound-icon').innerHTML = state.sound ? '&#128266;' : '&#128263;';
   const ss = $('sound-status'); if (ss) ss.textContent = state.sound ? 'ON' : 'OFF';
   const dvs = $('drum-view-status'); if (dvs) dvs.textContent = state.drumView ? 'ON' : 'OFF';
+  const bgs = $('bg-status'); if (bgs) bgs.textContent = state.taskBg ? 'ON' : 'OFF';
 }
 
 // ========== AUTO-RESIZE TEXTAREA ==========
