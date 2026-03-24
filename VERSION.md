@@ -28,7 +28,7 @@ python run.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.67 - added vertical line to tasks"
+git commit -m "v0.0.68 - update task date styles for improved readability"
 git push
 python run.py
 
@@ -49,4 +49,4 @@ v0.0.64 - server test 2
 v0.0.65 - server test 3
 v0.0.66 - added white circle to right menu buttton
 v0.0.67 - added vertical line to tasks
-
+v0.0.68 - update task date styles for improved readability

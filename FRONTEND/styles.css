@@ -608,10 +608,10 @@ body {
 
   .task-date {
     display: flex; gap: 3px; align-items: baseline;
-    font-size: 0.55rem; line-height: 1.1; white-space: nowrap;
+    font-size: 0.65rem; line-height: 1.1; white-space: nowrap;
 
-    .task-date-day { font-weight: 600; }
-    .task-date-time { opacity: 0.8; }
+    .task-date-day { font-weight: 700; }
+    .task-date-time { font-weight: 600; opacity: 0.9; }
 
     &.task-date-start { color: var(--accent-success); }
     &.task-date-end { color: var(--accent-fire); }
