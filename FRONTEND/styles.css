@@ -430,9 +430,13 @@ body {
   .drum-wrapper { left: 4%; right: 4%; }
 }
 @media (max-width: 767px) {
+  .task-item { min-height: 38px; top: calc(50% - 19px); gap: 2px; padding: 4px; }
+  .task-item.center { min-height: 50px; top: calc(50% - 25px); }
   .task-item .task-dates { display: none; }
   .task-item.center .task-dates { display: flex; }
-  .task-item .subtask-prefix { font-size: 0.2rem; letter-spacing: -4px; }
+  .task-item .subtask-prefix { font-size: 0.55rem; letter-spacing: -1px; }
+  .subtask-dash.connected-down::after,
+  .subtask-dash.connected-up::before { height: 38px; }
 }
 
 

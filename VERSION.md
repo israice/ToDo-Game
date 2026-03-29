@@ -28,7 +28,7 @@ python run.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.70 - fixed spacing in rows for mobile view"
+git commit -m "v0.0.71 - testing mobile version"
 git push
 python run.py
 
@@ -40,3 +40,4 @@ v0.0.67 - added vertical line to tasks
 v0.0.68 - update task date styles for improved readability
 v0.0.69 - fixed small visual issues
 v0.0.70 - fixed spacing in rows for mobile view
+v0.0.71 - testing mobile version
