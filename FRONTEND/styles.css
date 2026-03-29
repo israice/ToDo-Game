@@ -432,14 +432,15 @@ body {
 @media (max-width: 767px) {
   .task-item .task-dates { display: none; }
   .task-item.center .task-dates { display: flex; }
+  .task-item .subtask-prefix { font-size: 0.2rem; letter-spacing: -4px; }
 }
 
 
 .task-item {
   position: absolute;
-  top: calc(50% - 19px);
+  top: calc(50% - 25px);
   left: 8px; right: 8px;
-  height: 38px;
+  height: auto; min-height: 50px;
   display: flex; align-items: center; gap: 4px; padding: 6px;
   background: var(--bg-card); border-radius: 8px; border: 1px solid var(--border-color);
   backface-visibility: visible;
@@ -480,7 +481,7 @@ body {
   &.time-evening::before { background-image: url('bg_evening.png'); }
   &.time-night::before   { background-image: url('bg_night.png'); }
 
-  &.center { border: 2px solid var(--accent-fire); border-radius: 10px; height: auto; min-height: 38px; max-height: 60vh; transition: border-color 0.2s ease; }
+  &.center { border: 2px solid var(--accent-fire); border-radius: 10px; height: auto; min-height: 50px; max-height: 60vh; transition: border-color 0.2s ease; }
   &.center:has(.task-text[contenteditable="true"]) { border-color: var(--accent-primary); }
   &.center .task-text { white-space: pre-wrap; text-overflow: unset; overflow-y: auto; max-height: calc(60vh - 20px); }
   &:hover:not(.center) { border-color: var(--accent-primary); }
@@ -604,8 +605,8 @@ body {
   }
 
   .task-date {
-    display: flex; gap: 3px; align-items: baseline;
-    font-size: 0.65rem; line-height: 1.1; white-space: nowrap;
+    display: flex; flex-direction: column; align-items: center;
+    font-size: 0.55rem; line-height: 1.1; white-space: nowrap;
 
     .task-date-day { font-weight: 700; }
     .task-date-time { font-weight: 600; opacity: 0.9; }

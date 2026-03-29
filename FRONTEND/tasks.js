@@ -4,7 +4,7 @@ function formatTaskDate(iso) {
   if (!iso) return { day: '', time: '' };
   const d = new Date(iso);
   if (isNaN(d.getTime())) return { day: '', time: '' };
-  const day = d.getFullYear() + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + String(d.getDate()).padStart(2, '0');
+  const day = String(d.getFullYear() % 100).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + String(d.getDate()).padStart(2, '0');
   const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   return { day, time };
 }

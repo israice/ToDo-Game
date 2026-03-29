@@ -133,7 +133,7 @@ function renderTasks() {
   const highlightTaskIdx = scrollOffset + highlightIdx;
 
   let expandExtra = 0;
-  let centerH = 38;
+  let centerH = 50;
   const highlightEntry = (highlightTaskIdx >= 0 && highlightTaskIdx < _drumList.length) ? _drumList[highlightTaskIdx] : null;
   if (highlightEntry && highlightEntry.type === 'task') {
     const ct = highlightEntry.task;
@@ -155,9 +155,9 @@ function renderTasks() {
     list.appendChild(probe);
     centerH = probe.offsetHeight;
     list.removeChild(probe);
-    if (centerH > 38) {
+    if (centerH > 50) {
       const projGap = radius * Math.sin(angleStep * Math.PI / 180);
-      const overlap = centerH / 2 - (projGap - 19) + 4;
+      const overlap = centerH / 2 - (projGap - 25) + 4;
       if (overlap > 0) {
         expandExtra = (overlap / Math.max(1, projGap)) * angleStep;
       }
@@ -217,7 +217,7 @@ function renderTasks() {
     if (depth > 0) li.dataset.depth = depth;
     li.style.transform = drumTransform(angle);
     li.style.opacity = opacity;
-    if (isHighlight && centerH > 38) {
+    if (isHighlight && centerH > 50) {
       li.style.top = 'max(' + headerBottom + 'px, calc(50% - ' + (centerH / 2) + 'px))';
     }
     li.dataset.id = task.id;
@@ -234,10 +234,10 @@ function renderTasks() {
   const centerCard = wrapper.querySelector('.center');
   if (centerCard) {
     const realH = centerCard.offsetHeight;
-    if (realH > 38) {
+    if (realH > 50) {
       centerCard.style.top = 'max(' + headerBottom + 'px, calc(50% - ' + (realH / 2) + 'px))';
       const projGap = radius * Math.sin(angleStep * Math.PI / 180);
-      const overlap = realH / 2 - (projGap - 19) + 10;
+      const overlap = realH / 2 - (projGap - 25) + 10;
       if (overlap > 0) {
         const realExpand = (overlap / Math.max(1, projGap)) * angleStep;
         if (realExpand > expandExtra) {
