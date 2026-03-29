@@ -307,9 +307,10 @@ async function addTask(text) {
   const body = { text: text.trim() };
   const startInput = $('schedule-start');
   const endInput = $('schedule-end');
-  const nowISO = new Date().toISOString();
-  body.scheduled_start = (startInput && startInput.value) ? new Date(startInput.value).toISOString() : nowISO;
-  body.scheduled_end = (endInput && endInput.value) ? new Date(endInput.value).toISOString() : nowISO;
+  const now = new Date();
+  const in15 = new Date(now.getTime() + 15 * 60 * 1000);
+  body.scheduled_start = (startInput && startInput.value) ? new Date(startInput.value).toISOString() : now.toISOString();
+  body.scheduled_end = (endInput && endInput.value) ? new Date(endInput.value).toISOString() : in15.toISOString();
 
   const result = await api('/api/tasks', {
     method: 'POST',

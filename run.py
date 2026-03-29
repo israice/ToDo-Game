@@ -213,6 +213,13 @@ def init_db():
                 default = ' DEFAULT 0' if col == 'is_gcal_sourced' else ''
                 conn.execute(f'ALTER TABLE tasks ADD COLUMN {col} TEXT{default}')
 
+        # Fix tasks where scheduled_start == scheduled_end: set end = start + 15 min
+        conn.execute('''
+            UPDATE tasks SET scheduled_end = datetime(scheduled_start, '+15 minutes')
+            WHERE scheduled_start IS NOT NULL AND scheduled_end IS NOT NULL
+              AND scheduled_start = scheduled_end
+        ''')
+
         conn.executescript('''
             CREATE TABLE IF NOT EXISTS google_tokens (
                 user_id INTEGER PRIMARY KEY,
