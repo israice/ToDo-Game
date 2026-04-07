@@ -343,7 +343,10 @@ async function saveDateEditor() {
   const startVal = $('date-editor-start').value;
   const endVal = $('date-editor-end').value;
   const scheduled_start = startVal ? new Date(startVal).toISOString() : null;
-  const scheduled_end = endVal ? new Date(endVal).toISOString() : null;
+  let scheduled_end = endVal ? new Date(endVal).toISOString() : null;
+  if (scheduled_start && scheduled_end && new Date(scheduled_start) > new Date(scheduled_end)) {
+    scheduled_end = new Date(new Date(scheduled_start).getTime() + 15 * 60 * 1000).toISOString();
+  }
   const recurrence_rule = buildRecurrenceRule();
 
   const isInstance = !!task.recurrence_source_id;

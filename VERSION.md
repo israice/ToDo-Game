@@ -28,7 +28,7 @@ python run.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.72 - added more space in task row"
+git commit -m "v0.0.73 - fixed space between tasks"
 git push
 python run.py
 
@@ -42,3 +42,4 @@ v0.0.69 - fixed small visual issues
 v0.0.70 - fixed spacing in rows for mobile view
 v0.0.71 - testing mobile version
 v0.0.72 - added more space in task row
+v0.0.73 - fixed space between tasks

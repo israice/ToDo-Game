@@ -112,6 +112,25 @@ function buildTaskElements(task, depth) {
   if (task.recurrence_rule || task.recurrence_source_id) datesWrapper.classList.add('has-recurrence');
   if (task.is_gcal_sourced) datesWrapper.classList.add('gcal-sourced');
   datesWrapper.appendChild(startDateSpan);
+
+  if (task.scheduled_start && task.scheduled_end) {
+    const diffMs = Math.abs(new Date(task.scheduled_end).getTime() - new Date(task.scheduled_start).getTime());
+    if (diffMs > 0) {
+      const totalMin = Math.round(diffMs / 60000);
+      const d = Math.floor(totalMin / 1440);
+      const h = Math.floor((totalMin % 1440) / 60);
+      const m = totalMin % 60;
+      let dur = '';
+      if (d) dur += d + 'd';
+      if (h) dur += h + 'h';
+      if (m || !dur) dur += m + 'm';
+      const durSpan = document.createElement('span');
+      durSpan.className = 'task-duration';
+      durSpan.textContent = dur;
+      datesWrapper.appendChild(durSpan);
+    }
+  }
+
   datesWrapper.appendChild(endDateSpan);
 
   const settingsWrap = document.createElement('div');
@@ -313,6 +332,9 @@ async function addTask(text) {
   const in15 = new Date(now.getTime() + 15 * 60 * 1000);
   body.scheduled_start = (startInput && startInput.value) ? new Date(startInput.value).toISOString() : now.toISOString();
   body.scheduled_end = (endInput && endInput.value) ? new Date(endInput.value).toISOString() : in15.toISOString();
+  if (new Date(body.scheduled_start) > new Date(body.scheduled_end)) {
+    body.scheduled_end = new Date(new Date(body.scheduled_start).getTime() + 15 * 60 * 1000).toISOString();
+  }
 
   const result = await api('/api/tasks', {
     method: 'POST',

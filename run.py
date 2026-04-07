@@ -832,6 +832,11 @@ async def api_create_task(request: Request, user_id: int = Depends(get_authentic
     task_id, xp = _new_task_id()
     scheduled_start = data.get('scheduled_start') or None
     scheduled_end = data.get('scheduled_end') or None
+    if scheduled_start and scheduled_end:
+        from dateutil.parser import parse as dt_parse
+        s, e = dt_parse(scheduled_start), dt_parse(scheduled_end)
+        if s > e:
+            scheduled_end = (s + timedelta(minutes=15)).isoformat()
     parent_id = data.get('parent_id') or None
     recurrence_rule = data.get('recurrence_rule') or None
     if recurrence_rule and isinstance(recurrence_rule, dict):
@@ -888,6 +893,11 @@ async def api_update_task(task_id: str, request: Request, user_id: int = Depends
     if err: return err
     scheduled_start = data.get('scheduled_start')
     scheduled_end = data.get('scheduled_end')
+    if scheduled_start and scheduled_end:
+        from dateutil.parser import parse as dt_parse
+        s, e = dt_parse(scheduled_start), dt_parse(scheduled_end)
+        if s > e:
+            scheduled_end = (s + timedelta(minutes=15)).isoformat()
     _sentinel = object()
     recurrence_rule = data.get('recurrence_rule', _sentinel)
     recurrence_rule_provided = recurrence_rule is not _sentinel
@@ -1193,6 +1203,10 @@ async def bot_add_task(request: Request, user_id: int = Depends(get_token_authen
     now_iso = datetime.utcnow().isoformat()
     scheduled_start = data.get('scheduled_start') or now_iso
     scheduled_end = data.get('scheduled_end') or now_iso
+    from dateutil.parser import parse as dt_parse
+    s, e = dt_parse(scheduled_start), dt_parse(scheduled_end)
+    if s > e:
+        scheduled_end = (s + timedelta(minutes=15)).isoformat()
 
     with get_db() as conn:
         conn.execute('INSERT INTO tasks (id, user_id, text, xp_reward, scheduled_start, scheduled_end) VALUES (?, ?, ?, ?, ?, ?)',

@@ -176,9 +176,13 @@ class ApiService {
     }
 
     console.log(`User ${userId} adding task: "${text}"`);
-    const result = await this._request('POST', '/api/bot/tasks/add', { 
-      token: session.token, 
-      text 
+    const now = new Date();
+    const in15 = new Date(now.getTime() + 15 * 60 * 1000);
+    const result = await this._request('POST', '/api/bot/tasks/add', {
+      token: session.token,
+      text,
+      scheduled_start: now.toISOString(),
+      scheduled_end: in15.toISOString()
     });
     
     if (!result.success) {

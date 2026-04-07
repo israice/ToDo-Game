@@ -132,6 +132,11 @@ function renderTasks() {
 
   const highlightTaskIdx = scrollOffset + highlightIdx;
 
+  const FLAT_GAP = 4;
+  const FLAT_ROW_H = window.innerWidth >= MOBILE_BREAKPOINT ? 50 : 42;
+  const flatStepTotal = FLAT_ROW_H + FLAT_GAP;
+  const flatStep = flatStepTotal - FLAT_GAP;
+
   let expandExtra = 0;
   let centerH = 50;
   const highlightEntry = (highlightTaskIdx >= 0 && highlightTaskIdx < _drumList.length) ? _drumList[highlightTaskIdx] : null;
@@ -156,27 +161,23 @@ function renderTasks() {
     centerH = probe.offsetHeight;
     list.removeChild(probe);
     if (centerH > 50) {
-      const projGap = radius * Math.sin(angleStep * Math.PI / 180);
-      const overlap = centerH / 2 - (projGap - 25) + 4;
-      if (overlap > 0) {
-        expandExtra = (overlap / Math.max(1, projGap)) * angleStep;
-      }
+      const extraHalf = (centerH - 50) / 2;
+      expandExtra = (extraHalf / Math.max(1, curved ? flatStep : flatStepTotal)) * angleStep;
     }
   }
 
   const headerEl = document.querySelector('.header-block');
   const headerBottom = headerEl ? Math.ceil(headerEl.getBoundingClientRect().bottom) + 4 : 0;
-
-  const flatStep = radius * Math.sin(angleStep * Math.PI / 180);
   function drumTransform(angle) {
     if (curved) return 'rotateX(' + angle + 'deg) translateZ(' + radius + 'px)';
-    const y = -angle / angleStep * flatStep;
+    const y = -angle / angleStep * flatStepTotal;
     return 'translateY(' + Math.round(y) + 'px)';
   }
 
   for (let idx = 0; idx < totalRows; idx++) {
     const taskIdx = scrollOffset + idx;
-    let angle = (centerIdx + drumFraction - idx) * angleStep;
+    const angleOrigin = curved ? centerIdx : highlightIdx;
+    let angle = (angleOrigin + drumFraction - idx) * angleStep;
     if (idx !== highlightIdx && expandExtra > 0) {
       angle -= Math.sign(idx - highlightIdx) * expandExtra;
     }
@@ -232,26 +233,25 @@ function renderTasks() {
   }
 
   const centerCard = wrapper.querySelector('.center');
+  function _adjustNeighbors(h) {
+    if (h <= FLAT_ROW_H) return;
+    centerCard.style.top = 'max(' + headerBottom + 'px, calc(50% - ' + (h / 2) + 'px))';
+    const extraHalf = (h - FLAT_ROW_H) / 2;
+    const ex = (extraHalf / Math.max(1, curved ? flatStep : flatStepTotal)) * angleStep;
+    wrapper.querySelectorAll('.task-item:not(.center)').forEach(li => {
+      const idx = Number(li.dataset.drumIdx);
+      if (isNaN(idx)) return;
+      const aOrigin = curved ? centerIdx : highlightIdx;
+      let a = (aOrigin + drumFraction - idx) * angleStep;
+      a -= Math.sign(idx - highlightIdx) * Math.max(expandExtra, ex);
+      li.style.transform = drumTransform(a);
+      li.style.opacity = Math.max(0.15, 1 - Math.abs(a) / 120);
+    });
+  }
   if (centerCard) {
-    const realH = centerCard.offsetHeight;
-    if (realH > 50) {
-      centerCard.style.top = 'max(' + headerBottom + 'px, calc(50% - ' + (realH / 2) + 'px))';
-      const projGap = radius * Math.sin(angleStep * Math.PI / 180);
-      const overlap = realH / 2 - (projGap - 25) + 10;
-      if (overlap > 0) {
-        const realExpand = (overlap / Math.max(1, projGap)) * angleStep;
-        if (realExpand > expandExtra) {
-          wrapper.querySelectorAll('.task-item:not(.center)').forEach(li => {
-            const idx = Number(li.dataset.drumIdx);
-            if (isNaN(idx)) return;
-            let a = (centerIdx + drumFraction - idx) * angleStep;
-            a -= Math.sign(idx - highlightIdx) * realExpand;
-            li.style.transform = drumTransform(a);
-            li.style.opacity = Math.max(0.15, 1 - Math.abs(a) / 120);
-          });
-        }
-      }
-    }
+    _adjustNeighbors(centerCard.offsetHeight);
+    const ro = new ResizeObserver(() => _adjustNeighbors(centerCard.offsetHeight));
+    ro.observe(centerCard);
   }
 
   // Connect subtask vertical lines
