@@ -120,10 +120,11 @@ function buildTaskElements(task, depth) {
       const d = Math.floor(totalMin / 1440);
       const h = Math.floor((totalMin % 1440) / 60);
       const m = totalMin % 60;
-      let dur = '';
-      if (d) dur += d + 'd';
-      if (h) dur += h + 'h';
-      if (m || !dur) dur += m + 'm';
+      const parts = [];
+      if (d) parts.push(d + 'd');
+      if (h) parts.push(h + 'h');
+      if (m || !parts.length) parts.push(m + 'm');
+      const dur = parts.join(' ');
       const durSpan = document.createElement('span');
       durSpan.className = 'task-duration';
       durSpan.textContent = dur;
