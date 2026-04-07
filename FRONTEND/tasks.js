@@ -158,18 +158,20 @@ function assembleTaskItem(li, parts, depth) {
   if (depth > 0) {
     const prefix = document.createElement('span');
     prefix.className = 'subtask-prefix';
-    prefix.textContent = ' ';
+    prefix.textContent = '';
     for (let d = 1; d <= depth; d++) {
       const dash = document.createElement('span');
       dash.className = 'subtask-dash';
       dash.dataset.depth = d;
       dash.textContent = '-';
       prefix.appendChild(dash);
-      if (d < depth) prefix.appendChild(document.createTextNode('  '));
+      if (d < depth) prefix.appendChild(document.createTextNode(''));
     }
+    li.appendChild(parts.checkLabel);
     li.appendChild(prefix);
+  } else {
+    li.appendChild(parts.checkLabel);
   }
-  li.appendChild(parts.checkLabel);
   li.appendChild(parts.textSpan);
   li.appendChild(parts.datesWrapper);
   li.appendChild(parts.settingsWrap);

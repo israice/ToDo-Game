@@ -70,7 +70,7 @@ function getDrumParams() {
     const overlay = (header ? header.offsetHeight : 0) + (tabs ? tabs.offsetHeight : 0);
     h -= overlay;
   }
-  const rowHeight = isLarge ? ROW_HEIGHT_SETTING : Math.max(20, Math.round(ROW_HEIGHT_SETTING * 0.85));
+  const rowHeight = isLarge ? ROW_HEIGHT_SETTING : Math.max(20, Math.round(ROW_HEIGHT_SETTING * 0.84));
   const raw = Math.max(7, Math.floor(h / rowHeight));
   const totalRows = raw % 2 === 1 ? raw : raw - 1;
   const centerIdx = (totalRows - 1) / 2;
