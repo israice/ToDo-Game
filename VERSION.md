@@ -28,20 +28,11 @@ python run.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.75 - added description"
+git commit -m "v0.0.76 - added reset line button to top panel"
 git push
 python run.py
 
 # DEV LOG
-v0.0.64 - server test 2
-v0.0.65 - server test 3
-v0.0.66 - added white circle to right menu buttton
-v0.0.67 - added vertical line to tasks
-v0.0.68 - update task date styles for improved readability
-v0.0.69 - fixed small visual issues
-v0.0.70 - fixed spacing in rows for mobile view
-v0.0.71 - testing mobile version
-v0.0.72 - added more space in task row
-v0.0.73 - fixed space between tasks
 v0.0.74 - added space between yellow line
 v0.0.75 - added description
+v0.0.76 - added reset line button to top panel

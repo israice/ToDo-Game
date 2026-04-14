@@ -44,6 +44,10 @@ $('search-toggle').addEventListener('click', e => {
 });
 
 // ========== QUICK ADD TOGGLE ==========
+$('jump-current-toggle')?.addEventListener('click', () => {
+  scrollToCurrentTask();
+});
+
 $('add-task-toggle').addEventListener('click', e => {
   e.stopPropagation();
   const row = $('quick-add-row');
@@ -265,20 +269,6 @@ window.addEventListener('resize', () => {
   _drumJumpToIdx = scrollOffset + oldHi;
   renderTasks();
 });
-
-// Auto-scroll to current task after 10s of inactivity
-let _idleTimer = null;
-function resetIdleTimer() {
-  clearTimeout(_idleTimer);
-  _idleTimer = setTimeout(() => {
-    if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.contentEditable === 'true')) return;
-    if ($('settings-dropdown')?.classList.contains('show')) return;
-    if ($('quick-add-row')?.classList.contains('show')) return;
-    scrollToCurrentTask();
-  }, 10000);
-}
-['mousemove','keydown','pointerdown','scroll'].forEach(e => document.addEventListener(e, resetIdleTimer));
-resetIdleTimer();
 
 // Load state from server
 loadState().then(async () => {

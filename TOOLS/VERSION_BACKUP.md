@@ -62,3 +62,13 @@ v0.0.60 - js files to each global functionality
 v0.0.61 - added colored sub tasks indicator in left side
 v0.0.62 - added task backgroud
 v0.0.63 - server test 1
+v0.0.64 - server test 2
+v0.0.65 - server test 3
+v0.0.66 - added white circle to right menu buttton
+v0.0.67 - added vertical line to tasks
+v0.0.68 - update task date styles for improved readability
+v0.0.69 - fixed small visual issues
+v0.0.70 - fixed spacing in rows for mobile view
+v0.0.71 - testing mobile version
+v0.0.72 - added more space in task row
+v0.0.73 - fixed space between tasks

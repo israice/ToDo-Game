@@ -378,7 +378,6 @@ function scrollToNewTask(id) {
   if (idx >= 0) {
     const { highlightIdx } = getDrumParams();
     scrollToTarget(idx - highlightIdx);
-    resetIdleTimer();
   }
 }
 
@@ -659,12 +658,10 @@ function initTaskDrag() {
     if (e.repeat) return;
     const dir = e.key === 'ArrowUp' ? -1 : 1;
     drumArrowStep(dir);
-    resetIdleTimer();
     stopKeyRepeat();
     _keyRepeatTimer = setTimeout(() => {
       _keyRepeatInterval = setInterval(() => {
         drumArrowStep(dir, true);
-        resetIdleTimer();
       }, 300);
     }, 500);
   });

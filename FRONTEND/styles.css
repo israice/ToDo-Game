@@ -236,7 +236,7 @@ body {
 }
 
 /* ===== ICON BUTTONS (shared) ===== */
-.search-toggle-btn, .add-task-btn {
+.search-toggle-btn, .jump-current-btn, .add-task-btn {
   width: 32px; height: 32px;
   background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
   color: white;
@@ -246,6 +246,7 @@ body {
   &:active { transform: scale(0.95); }
 }
 .search-toggle-btn { font-size: 0.85rem; line-height: 1; }
+.jump-current-btn { font-size: 0.9rem; line-height: 1; }
 .add-task-btn { font-size: 1.2rem; font-weight: 300; line-height: 1; }
 
 /* ===== SETTINGS ===== */
@@ -1276,11 +1277,12 @@ body {
   .xp-container-full .xp-bar .xp-text {
     font-size: 0.55rem;
   }
-  .search-toggle-btn, .add-task-btn {
+  .search-toggle-btn, .jump-current-btn, .add-task-btn {
     width: 28px;
     height: 28px;
   }
   .search-toggle-btn { font-size: 0.75rem; }
+  .jump-current-btn { font-size: 0.8rem; }
   .add-task-btn { font-size: 1rem; }
   .settings-wrapper .settings-btn {
     width: 28px;
