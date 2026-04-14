@@ -7,6 +7,7 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>">
     <link rel="stylesheet" href="/static/styles.css">
     <link rel="stylesheet" href="/static/login.css">
+    <style>:root{--accent-primary:{{ accent_primary }};--accent-fire:{{ accent_fire }};}</style>
 </head>
 <body{% if register_error and register_error != "User already exists" %} data-show-register="1"{% endif %}>
     <div class="login-container">

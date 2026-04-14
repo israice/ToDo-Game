@@ -94,9 +94,11 @@ def recurrence_rule_to_rrule(rule):
     return ['RRULE:' + ';'.join(parts)]
 
 
-def task_to_event(text, start_iso, end_iso, recurrence_rule=None):
+def task_to_event(text, start_iso, end_iso, recurrence_rule=None, description=None):
     """Convert task data to a Google Calendar event dict."""
     event = {'summary': text}
+    if description:
+        event['description'] = description
 
     if start_iso:
         if len(start_iso) <= 10:
@@ -122,9 +124,9 @@ def task_to_event(text, start_iso, end_iso, recurrence_rule=None):
     return event
 
 
-def create_calendar_event(service, calendar_id, text, start_iso, end_iso, recurrence_rule=None):
+def create_calendar_event(service, calendar_id, text, start_iso, end_iso, recurrence_rule=None, description=None):
     """Create a new event in Google Calendar. Returns the event ID."""
-    event = task_to_event(text, start_iso, end_iso, recurrence_rule)
+    event = task_to_event(text, start_iso, end_iso, recurrence_rule, description)
     try:
         result = service.events().insert(calendarId=calendar_id, body=event).execute()
         return result.get('id')
@@ -133,9 +135,9 @@ def create_calendar_event(service, calendar_id, text, start_iso, end_iso, recurr
         return None
 
 
-def update_calendar_event(service, calendar_id, event_id, text, start_iso, end_iso, recurrence_rule=None):
+def update_calendar_event(service, calendar_id, event_id, text, start_iso, end_iso, recurrence_rule=None, description=None):
     """Update an existing event in Google Calendar."""
-    event = task_to_event(text, start_iso, end_iso, recurrence_rule)
+    event = task_to_event(text, start_iso, end_iso, recurrence_rule, description)
     try:
         service.events().update(calendarId=calendar_id, eventId=event_id, body=event).execute()
         return True

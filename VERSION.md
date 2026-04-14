@@ -28,7 +28,7 @@ python run.py
 
 # UPDATE
 git add .
-git commit -m "v0.0.74 - added space between yellow line"
+git commit -m "v0.0.75 - added description"
 git push
 python run.py
 
@@ -44,3 +44,4 @@ v0.0.71 - testing mobile version
 v0.0.72 - added more space in task row
 v0.0.73 - fixed space between tasks
 v0.0.74 - added space between yellow line
+v0.0.75 - added description

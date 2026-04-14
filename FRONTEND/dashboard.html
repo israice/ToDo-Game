@@ -10,12 +10,23 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}?v={{ app_version }}&t={{ cache_bust }}">
+    <style>:root{--accent-primary:{{ accent_primary }};--accent-fire:{{ accent_fire }};}</style>
 </head>
 <body data-drum-row-height="{{ drum_row_height }}" data-drum-max-top-angle="{{ drum_max_top_angle }}" data-drum-perspective-k="{{ drum_perspective_k }}" data-drum-highlight-offset="{{ drum_highlight_offset }}">
     <a href="#tasks-list" class="skip-to-content">Skip to tasks</a>
     <div class="app-container">
         <!-- Particles container for effects -->
         <div id="particles"></div>
+
+        <!-- Connect Google Calendar overlay -->
+        <div id="gcal-required-overlay" class="gcal-required-overlay" style="display:none" role="dialog" aria-label="Google Calendar required">
+            <div class="gcal-required-content">
+                <div class="gcal-required-icon">&#128197;</div>
+                <div class="gcal-required-title">CONNECT GCAL</div>
+                <p class="gcal-required-desc">All tasks are synced with Google Calendar. Please connect your calendar to continue.</p>
+                <button type="button" class="gcal-required-btn" id="gcal-required-connect">Connect Google Calendar</button>
+            </div>
+        </div>
 
         <div class="header-block">
         <div class="xp-row">

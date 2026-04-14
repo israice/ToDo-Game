@@ -8,6 +8,13 @@ BRANCH = "master"
 GOOGLE_CALENDAR_SYNC_INTERVAL = 5
 INSTANCE_ROLE = "primary"  # "primary" = prod (push + incremental), "replica" = dev (polling + full sync)
 
+# Theme colors
+ACCENT_PRIMARY = "#6c5ce7"  # purple — editing border, focus, links
+ACCENT_FIRE = "#ff6b6b"     # red — active task border, danger, combo
+
+# Task description (matches Google Calendar event description limit)
+MAX_DESCRIPTION_LENGTH = 8192
+
 # Drum (3D carousel) settings
 DRUM_ROW_HEIGHT = 50        # row height in px (packing density on the drum)
 DRUM_MAX_TOP_ANGLE = 30     # max angle for outermost row (degrees) — higher = more curvature

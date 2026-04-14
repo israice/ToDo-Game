@@ -228,6 +228,7 @@ function renderTasks() {
 
     li.dataset.drumIdx = idx;
     setupEditMode(parts.textSpan, task, list, true);
+    if (parts.descSpan) setupDescriptionEdit(parts.descSpan, task, list);
 
     wrapper.appendChild(li);
   }
@@ -590,6 +591,11 @@ function initTaskDrag() {
       }, 500);
     }
 
+    if (e.target.closest('.task-description')) {
+      isDragging = false;
+      return;
+    }
+
     const centerText = e.target.closest('.center .task-text');
     if (centerText && centerText.scrollHeight > centerText.clientHeight) {
       list.style.touchAction = 'pan-y';
@@ -673,6 +679,8 @@ function initTaskDrag() {
     if (e.target.closest('[contenteditable="true"]')) return;
     const taskText = e.target.closest('.center .task-text');
     if (taskText && taskText.scrollHeight > taskText.clientHeight) return;
+    const taskDesc = e.target.closest('.center .task-description');
+    if (taskDesc && taskDesc.scrollHeight > taskDesc.clientHeight) return;
     e.preventDefault();
     cancelAnimationFrame(_drumSnapRaf);
     _drumScrollTarget = null;

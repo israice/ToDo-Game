@@ -102,6 +102,17 @@ function buildTaskElements(task, depth) {
   textSpan.dir = 'auto';
   textSpan.textContent = task.text;
 
+  const descSpan = document.createElement('span');
+  descSpan.className = 'task-description';
+  descSpan.dir = 'auto';
+  const _desc = (task.description || '').trim();
+  if (_desc) {
+    descSpan.textContent = _desc;
+  } else {
+    descSpan.textContent = 'add description...';
+    descSpan.classList.add('placeholder');
+  }
+
   const start = formatTaskDate(task.scheduled_start);
   const end = formatTaskDate(task.scheduled_end);
   const sameDate = start.day && end.day && start.day === end.day && start.time === end.time;
@@ -171,7 +182,7 @@ function buildTaskElements(task, depth) {
   settingsMenu.appendChild(menuDeleteBtn);
   settingsWrap.appendChild(settingsBtn);
 
-  return { timePeriod, textSpan, datesWrapper, settingsWrap, settingsBtn, settingsMenu, menuDeleteBtn, menuMediaBtn, menuMagicBtn, menuAddSubBtn };
+  return { timePeriod, textSpan, descSpan, datesWrapper, settingsWrap, settingsBtn, settingsMenu, menuDeleteBtn, menuMediaBtn, menuMagicBtn, menuAddSubBtn };
 }
 
 function assembleTaskItem(li, parts, depth) {
@@ -193,6 +204,7 @@ function assembleTaskItem(li, parts, depth) {
     li.appendChild(parts.checkLabel);
   }
   li.appendChild(parts.textSpan);
+  if (parts.descSpan) li.appendChild(parts.descSpan);
   li.appendChild(parts.datesWrapper);
   li.appendChild(parts.settingsWrap);
 }
@@ -549,4 +561,61 @@ async function editTask(id, newText) {
 
   const task = state.tasks.find(t => t.id === id);
   if (task) task.text = text;
+}
+
+async function editTaskDescription(id, newDesc) {
+  const task = state.tasks.find(t => t.id === id);
+  const text = task ? task.text : '';
+  const description = (newDesc || '').trim();
+  await api(`/api/tasks/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ text, description })
+  });
+  if (task) task.description = description;
+}
+
+function setupDescriptionEdit(descSpan, task, list) {
+  let original = task.description || '';
+  const debouncedEdit = debounce((id, desc) => editTaskDescription(id, desc), DEBOUNCE_DELAY_MS);
+  let editing = false;
+
+  const enterEdit = () => {
+    if (editing) return;
+    editing = true;
+    original = task.description || '';
+    list.classList.add('editing');
+    descSpan.classList.remove('placeholder');
+    descSpan.textContent = original;
+    descSpan.setAttribute('contenteditable', 'true');
+    descSpan.focus();
+    document.getSelection().selectAllChildren(descSpan);
+  };
+  const exitEdit = (save) => {
+    if (!editing) return;
+    editing = false;
+    const desc = descSpan.innerText.trim();
+    descSpan.removeAttribute('contenteditable');
+    list.classList.remove('editing');
+    if (save && desc !== original) debouncedEdit(task.id, desc);
+    if (!desc) {
+      descSpan.textContent = 'add description...';
+      descSpan.classList.add('placeholder');
+    } else {
+      descSpan.textContent = desc;
+    }
+  };
+
+  let _lpTimer = null;
+  descSpan.addEventListener('pointerdown', () => {
+    _lpTimer = setTimeout(() => { _lpTimer = null; enterEdit(); }, 500);
+  });
+  descSpan.addEventListener('pointerup', () => { clearTimeout(_lpTimer); _lpTimer = null; });
+  descSpan.addEventListener('pointercancel', () => { clearTimeout(_lpTimer); _lpTimer = null; });
+  descSpan.addEventListener('pointermove', (e) => {
+    if (_lpTimer && (Math.abs(e.movementX) > 5 || Math.abs(e.movementY) > 5)) { clearTimeout(_lpTimer); _lpTimer = null; }
+  });
+  descSpan.onblur = () => exitEdit(true);
+  descSpan.onkeydown = e => {
+    if (e.key === 'Escape') { exitEdit(false); }
+  };
 }
